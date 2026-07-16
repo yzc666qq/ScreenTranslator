@@ -39,26 +39,34 @@ public sealed class OpenAiCompatibleTranslationService(HttpClient httpClient) : 
         var options = _options
             ?? throw new InvalidOperationException("尚未配置翻译服务。 ");
 
+        _ = sourceLanguageHint;
         var sourceInstruction = sourceLanguage.Equals("auto", StringComparison.OrdinalIgnoreCase)
-            ? BuildAutomaticSourceInstruction(sourceLanguageHint)
-            : $"源语言是 {sourceLanguage}。";
+            ? "Detect the source language or languages from the text itself."
+            : $"The source language is {sourceLanguage}.";
 
-        var translatedText = await SendTranslationRequestAsync(
+        var firstTranslation = await SendTranslationRequestAsync(
             options,
             text,
             BuildSystemPrompt(sourceInstruction, targetLanguage, isCorrectiveRetry: false),
             cancellationToken);
 
-        if (TranslationQualityGuard.ShouldRetry(text, translatedText, targetLanguage))
+        if (!TranslationQualityGuard.ShouldRetry(text, firstTranslation, targetLanguage))
         {
-            translatedText = await SendTranslationRequestAsync(
-                options,
-                text,
-                BuildSystemPrompt(sourceInstruction, targetLanguage, isCorrectiveRetry: true),
-                cancellationToken);
+            return new TranslationResult(text, firstTranslation, sourceLanguage, targetLanguage);
         }
 
-        return new TranslationResult(text, translatedText, sourceLanguage, targetLanguage);
+        var retryTranslation = await SendTranslationRequestAsync(
+            options,
+            text,
+            BuildSystemPrompt(sourceInstruction, targetLanguage, isCorrectiveRetry: true),
+            cancellationToken);
+        var preferredTranslation = TranslationQualityGuard.SelectPreferredTranslation(
+            text,
+            firstTranslation,
+            retryTranslation,
+            targetLanguage);
+
+        return new TranslationResult(text, preferredTranslation, sourceLanguage, targetLanguage);
     }
 
     private async Task<string> SendTranslationRequestAsync(
@@ -79,13 +87,15 @@ public sealed class OpenAiCompatibleTranslationService(HttpClient httpClient) : 
                 model = options.Model,
                 messages,
                 stream = false,
+                temperature = 0.1,
                 thinking = new { type = "disabled" }
             }
             : new
             {
                 model = options.Model,
                 messages,
-                stream = false
+                stream = false,
+                temperature = 0.1
             };
 
         using var request = new HttpRequestMessage(HttpMethod.Post, options.Endpoint);
@@ -124,26 +134,15 @@ public sealed class OpenAiCompatibleTranslationService(HttpClient httpClient) : 
         string targetLanguage,
         bool isCorrectiveRetry)
     {
-        var correctiveInstruction = isCorrectiveRetry
-            ? $"检测到上一版可能仍是源语言。请重新翻译，确保自然语言输出为 {targetLanguage}，不得原样返回整段源文本。"
-            : $"必须把所有可翻译的自然语言内容转换为 {targetLanguage}；除专有名词、代码或正文已经是目标语言外，不得原样返回源文本。";
+        var retryInstruction = isCorrectiveRetry
+            ? "The previous attempt echoed the source. Perform the translation again and do not paraphrase in the source language. "
+            : string.Empty;
 
-        return $"你是实时屏幕翻译器。{sourceInstruction}把正文翻译为 {targetLanguage}。{correctiveInstruction}严格保持原文的换行、空行、相对缩进、编号和标点结构；不要合并或拆分行。只输出译文，不要解释，不要添加 Markdown 代码块。";
-    }
-
-    private static string BuildAutomaticSourceInstruction(string? sourceLanguageHint)
-    {
-        if (string.IsNullOrWhiteSpace(sourceLanguageHint))
-        {
-            return "先根据正文自动判断源语言；正文可能包含多种语言。";
-        }
-
-        var normalizedHint = sourceLanguageHint.Trim();
-        if (normalizedHint.Length > 32)
-        {
-            normalizedHint = normalizedHint[..32];
-        }
-
-        return $"先根据正文自动判断源语言；OCR 提供的语言线索是 {normalizedHint}，但它仅作为线索，若与正文不符应以正文为准，并允许正文包含多种语言。";
+        return $"You are a real-time screen translation engine. {sourceInstruction} " +
+               $"Translate every natural-language passage into {targetLanguage}. {retryInstruction}" +
+               "Keep names, code, commands, paths, URLs, and numbers unchanged when appropriate. " +
+               "Preserve paragraph breaks, blank lines, indentation, list numbering, and punctuation where practical, " +
+               "but prioritize accurate, natural translation over matching the exact number of lines. " +
+               "If text is already in the target language, keep it unchanged. Return only the translation, without explanations or Markdown fences.";
     }
 }

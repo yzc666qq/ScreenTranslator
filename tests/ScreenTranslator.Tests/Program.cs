@@ -29,6 +29,8 @@ internal static class Program
         Run("Overlay preserves translated text and region", TestOverlayWindow);
         Run("DeepSeek adapter preserves formatting", () => TestDeepSeekAdapterAsync().GetAwaiter().GetResult());
         Run("Untranslated output retries once", () => TestUntranslatedOutputRetryAsync().GetAwaiter().GetResult());
+        Run("A worse retry cannot replace the original response", () => TestWorseRetryIsRejectedAsync().GetAwaiter().GetResult());
+        Run("Mixed target-language output is not retried", () => TestMixedTranslationIsAcceptedAsync().GetAwaiter().GetResult());
         Run("Generic OpenAI adapter omits DeepSeek-only fields", () => TestGenericAdapterAsync().GetAwaiter().GetResult());
         Run("Windows OCR recognizes a synthetic image", () => TestWindowsOcrAsync().GetAwaiter().GetResult());
 
@@ -243,15 +245,18 @@ internal static class Program
         using var document = JsonDocument.Parse(handler.RequestBody!);
         var root = document.RootElement;
         AssertEqual("disabled", root.GetProperty("thinking").GetProperty("type").GetString());
+        Assert(Math.Abs(root.GetProperty("temperature").GetDouble() - 0.1) < 0.001,
+            "Translation requests must use a low temperature for stable output.");
         AssertEqual(source, root.GetProperty("messages")[1].GetProperty("content").GetString());
         var prompt = root.GetProperty("messages")[0].GetProperty("content").GetString()!;
-        Assert(prompt.Contains("自动判断源语言", StringComparison.Ordinal),
+        Assert(prompt.Contains("Detect the source language", StringComparison.Ordinal),
             "Automatic source-language detection must be explicit in the prompt.");
-        Assert(prompt.Contains("en-US", StringComparison.Ordinal) &&
-               prompt.Contains("仅作为线索", StringComparison.Ordinal),
-            "OCR language must be treated as a fallible hint.");
-        Assert(prompt.Contains("空行", StringComparison.Ordinal), "Formatting prompt must preserve blank lines.");
-        Assert(prompt.Contains("相对缩进", StringComparison.Ordinal), "Formatting prompt must preserve indentation.");
+        Assert(!prompt.Contains("en-US", StringComparison.Ordinal),
+            "The installed OCR language pack must not bias model source-language detection.");
+        Assert(prompt.Contains("blank lines", StringComparison.Ordinal), "Formatting prompt must preserve blank lines.");
+        Assert(prompt.Contains("indentation", StringComparison.Ordinal), "Formatting prompt must preserve indentation.");
+        Assert(prompt.Contains("prioritize accurate, natural translation", StringComparison.Ordinal),
+            "Formatting constraints must not override translation accuracy.");
     }
 
     private static async Task TestGenericAdapterAsync()
@@ -307,8 +312,56 @@ internal static class Program
             .GetProperty("messages")[0]
             .GetProperty("content")
             .GetString()!;
-        Assert(prompt.Contains("上一版可能仍是源语言", StringComparison.Ordinal),
+        Assert(prompt.Contains("previous attempt echoed the source", StringComparison.Ordinal),
             "The retry must use an explicit corrective translation prompt.");
+    }
+
+    private static async Task TestWorseRetryIsRejectedAsync()
+    {
+        var responseIndex = 0;
+        var handler = new RecordingHandler(_ => JsonResponse(new
+        {
+            choices = new[]
+            {
+                new
+                {
+                    message = new
+                    {
+                        content = responseIndex++ == 0 ? "Open settings" : "Open preferences"
+                    }
+                }
+            }
+        }));
+        using var client = new HttpClient(handler);
+        var service = new OpenAiCompatibleTranslationService(client);
+        service.Configure(new TranslationProviderOptions(
+            new Uri("https://example.test/v1/chat/completions"),
+            "compatible-model",
+            "unit-test-key"));
+
+        var result = await service.TranslateAsync("Open settings", "auto", "zh-CN");
+
+        AssertEqual("Open settings", result.TranslatedText);
+        AssertEqual(2, handler.RequestCount);
+    }
+
+    private static async Task TestMixedTranslationIsAcceptedAsync()
+    {
+        var handler = new RecordingHandler(_ => JsonResponse(new
+        {
+            choices = new[] { new { message = new { content = "打开 Settings" } } }
+        }));
+        using var client = new HttpClient(handler);
+        var service = new OpenAiCompatibleTranslationService(client);
+        service.Configure(new TranslationProviderOptions(
+            new Uri("https://example.test/v1/chat/completions"),
+            "compatible-model",
+            "unit-test-key"));
+
+        var result = await service.TranslateAsync("Open settings", "auto", "zh-CN");
+
+        AssertEqual("打开 Settings", result.TranslatedText);
+        AssertEqual(1, handler.RequestCount);
     }
 
     private static async Task TestWindowsOcrAsync()

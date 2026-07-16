@@ -164,17 +164,13 @@ public partial class MainWindow : Window
                 }
                 else if (_textChangeTracker.ShouldTranslate(recognized.Text))
                 {
-                    var languageHint = recognized.DetectedLanguage is { Length: > 0 } hint
-                        ? $" · OCR 线索：{hint}"
-                        : string.Empty;
-                    var languageDetection = $"源语言：自动检测{languageHint}";
+                    const string languageDetection = "源语言：由模型根据正文自动检测";
                     SetStatus("发现文字变化，正在翻译", languageDetection, isError: false);
                     var translated = await _translationService.TranslateAsync(
                         recognized.Text,
                         "auto",
                         GetTargetLanguage(),
-                        cancellationToken,
-                        recognized.DetectedLanguage);
+                        cancellationToken);
 
                     _textChangeTracker.MarkTranslated(recognized.Text);
                     _lastTranslation = translated.TranslatedText;

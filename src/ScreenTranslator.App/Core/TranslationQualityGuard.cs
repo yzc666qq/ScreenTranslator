@@ -8,35 +8,30 @@ public static class TranslationQualityGuard
         ArgumentNullException.ThrowIfNull(translatedText);
         ArgumentException.ThrowIfNullOrWhiteSpace(targetLanguage);
 
-        var target = targetLanguage.Trim();
-        var sourceLatinLetters = sourceText.Count(IsLatinLetter);
-        var translatedLatinLetters = translatedText.Count(IsLatinLetter);
-        var sourceHanCharacters = sourceText.Count(IsHanCharacter);
-        var translatedHanCharacters = translatedText.Count(IsHanCharacter);
+        var normalizedSource = NormalizeForComparison(sourceText);
+        return normalizedSource.Length > 0 && normalizedSource
+            .Equals(NormalizeForComparison(translatedText), StringComparison.OrdinalIgnoreCase);
+    }
 
-        if (IsChineseTarget(target))
+    public static string SelectPreferredTranslation(
+        string sourceText,
+        string firstTranslation,
+        string retryTranslation,
+        string targetLanguage)
+    {
+        ArgumentNullException.ThrowIfNull(sourceText);
+        ArgumentNullException.ThrowIfNull(firstTranslation);
+        ArgumentNullException.ThrowIfNull(retryTranslation);
+        ArgumentException.ThrowIfNullOrWhiteSpace(targetLanguage);
+
+        if (!ShouldRetry(sourceText, firstTranslation, targetLanguage))
         {
-            return sourceLatinLetters >= 4 && translatedHanCharacters == 0;
+            return firstTranslation;
         }
 
-        if (IsEnglishTarget(target))
-        {
-            return sourceHanCharacters >= 2 && translatedLatinLetters < 3;
-        }
-
-        if (IsKoreanTarget(target))
-        {
-            return (sourceLatinLetters >= 4 || sourceHanCharacters >= 2) &&
-                   !translatedText.Any(IsHangulCharacter);
-        }
-
-        if (IsJapaneseTarget(target))
-        {
-            return sourceLatinLetters >= 4 &&
-                   !translatedText.Any(character => IsKanaCharacter(character) || IsHanCharacter(character));
-        }
-
-        return false;
+        return HasExpectedTargetWriting(retryTranslation, targetLanguage)
+            ? retryTranslation
+            : firstTranslation;
     }
 
     private static bool IsChineseTarget(string target) =>
@@ -64,6 +59,39 @@ public static class TranslationQualityGuard
         target.Contains("日语", StringComparison.OrdinalIgnoreCase) ||
         target.Contains("日本", StringComparison.OrdinalIgnoreCase) ||
         target.Contains("Japanese", StringComparison.OrdinalIgnoreCase);
+
+    private static bool HasExpectedTargetWriting(string text, string targetLanguage)
+    {
+        var target = targetLanguage.Trim();
+
+        if (IsChineseTarget(target))
+        {
+            return text.Any(IsHanCharacter);
+        }
+
+        if (IsEnglishTarget(target))
+        {
+            return text.Any(IsLatinLetter);
+        }
+
+        if (IsKoreanTarget(target))
+        {
+            return text.Any(IsHangulCharacter);
+        }
+
+        if (IsJapaneseTarget(target))
+        {
+            return text.Any(character => IsKanaCharacter(character) || IsHanCharacter(character));
+        }
+
+        return NormalizeForComparison(text).Length > 0;
+    }
+
+    private static string NormalizeForComparison(string sourceText) =>
+        new(sourceText
+            .Where(char.IsLetterOrDigit)
+            .Select(char.ToUpperInvariant)
+            .ToArray());
 
     private static bool IsLatinLetter(char character) =>
         character is >= 'A' and <= 'Z' or >= 'a' and <= 'z';
