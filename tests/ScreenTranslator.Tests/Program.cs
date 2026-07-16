@@ -22,6 +22,7 @@ internal static class Program
     {
         Run("OCR layout preserves indentation and blank lines", TestOcrLayoutFormatting);
         Run("Unchanged OCR text is not translated twice", TestRecognizedTextChangeTracking);
+        Run("Main controls do not stay topmost", TestMainWindowLayering);
         Run("Region selector covers the virtual desktop", TestRegionSelectorWindow);
         Run("Side panel supports locking, resizing and opacity", TestSidePanelControls);
         Run("Overlay preserves translated text and region", TestOverlayWindow);
@@ -88,6 +89,29 @@ internal static class Program
         Assert(panel.Topmost, "Side panel must stay topmost.");
         AssertEqual(WpfResizeMode.CanResizeWithGrip, panel.ResizeMode);
 
+        var controlDock = (Border)panel.FindName("ControlDock");
+        Assert(controlDock.Opacity < 0.25,
+            "Side-panel controls must stay visually unobtrusive until the user points at them.");
+
+        var opacityToggle = (System.Windows.Controls.Primitives.ToggleButton)panel.FindName("OpacityToggle");
+        var opacityPopup = (System.Windows.Controls.Primitives.Popup)panel.FindName("OpacityPopup");
+        panel.Show();
+
+        try
+        {
+            opacityToggle.IsChecked = true;
+            panel.Dispatcher.Invoke(
+                () => { },
+                System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+            Assert(opacityPopup.IsOpen, "Opacity controls must open only when requested.");
+            opacityToggle.IsChecked = false;
+        }
+        finally
+        {
+            opacityPopup.IsOpen = false;
+            panel.Hide();
+        }
+
         var lockToggle = (System.Windows.Controls.Primitives.ToggleButton)panel.FindName("LockToggle");
         lockToggle.IsChecked = true;
         AssertEqual(WpfResizeMode.NoResize, panel.ResizeMode);
@@ -105,6 +129,18 @@ internal static class Program
         var textBlock = (TextBlock)panel.FindName("TranslationText");
         AssertEqual(translated, textBlock.Text);
         panel.AllowClose();
+    }
+
+    private static void TestMainWindowLayering()
+    {
+        if (System.Windows.Application.Current is null)
+        {
+            var application = new ScreenTranslator.App.App();
+            application.InitializeComponent();
+        }
+
+        var mainWindow = new ScreenTranslator.App.MainWindow();
+        Assert(!mainWindow.Topmost, "The main control window must not cover other applications permanently.");
     }
 
     private static void TestRegionSelectorWindow()

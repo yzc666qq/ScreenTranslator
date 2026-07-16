@@ -9,7 +9,7 @@
         AllowsTransparency="True"
         Background="Transparent"
         ResizeMode="CanResizeWithGrip"
-        Topmost="True"
+        Topmost="False"
         WindowStartupLocation="CenterScreen"
         WindowStyle="None">
     <Window.Resources>

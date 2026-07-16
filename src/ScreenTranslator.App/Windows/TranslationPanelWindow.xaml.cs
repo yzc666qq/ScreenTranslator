@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Windows;
 using System.Windows.Input;
 using ScreenTranslator.App.Interop;
+using MouseEventArgs = System.Windows.Input.MouseEventArgs;
 
 namespace ScreenTranslator.App.Windows;
 
@@ -65,6 +66,27 @@ public partial class TranslationPanelWindow : Window
     private void HideButton_Click(object sender, RoutedEventArgs e)
     {
         Hide();
+    }
+
+    private void ControlDock_MouseEnter(object sender, MouseEventArgs e)
+    {
+        ControlDock.Opacity = 0.96;
+    }
+
+    private void ControlDock_MouseLeave(object sender, MouseEventArgs e)
+    {
+        if (!OpacityPopup.IsOpen)
+        {
+            ControlDock.Opacity = 0.18;
+        }
+    }
+
+    private void OpacityPopup_Closed(object? sender, EventArgs e)
+    {
+        if (!ControlDock.IsMouseOver)
+        {
+            ControlDock.Opacity = 0.18;
+        }
     }
 
     private void UpdateOpacityLabel()
