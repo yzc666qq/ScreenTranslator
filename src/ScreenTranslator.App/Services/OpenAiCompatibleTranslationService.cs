@@ -29,7 +29,8 @@ public sealed class OpenAiCompatibleTranslationService(HttpClient httpClient) : 
         string text,
         string sourceLanguage,
         string targetLanguage,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        string? sourceLanguageHint = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(text);
         ArgumentException.ThrowIfNullOrWhiteSpace(sourceLanguage);
@@ -38,16 +39,16 @@ public sealed class OpenAiCompatibleTranslationService(HttpClient httpClient) : 
         var options = _options
             ?? throw new InvalidOperationException("尚未配置翻译服务。 ");
 
-        var sourceDescription = sourceLanguage.Equals("auto", StringComparison.OrdinalIgnoreCase)
-            ? "自动识别的源语言"
-            : sourceLanguage;
+        var sourceInstruction = sourceLanguage.Equals("auto", StringComparison.OrdinalIgnoreCase)
+            ? BuildAutomaticSourceInstruction(sourceLanguageHint)
+            : $"源语言是 {sourceLanguage}。";
 
         var messages = new object[]
         {
             new
             {
                 role = "system",
-                content = $"你是实时屏幕翻译器。把{sourceDescription}翻译为 {targetLanguage}。严格保持原文的换行、空行、相对缩进、编号和标点结构；不要合并或拆分行。只输出译文，不要解释，不要添加 Markdown 代码块。"
+                content = $"你是实时屏幕翻译器。{sourceInstruction}把正文翻译为 {targetLanguage}。严格保持原文的换行、空行、相对缩进、编号和标点结构；不要合并或拆分行。只输出译文，不要解释，不要添加 Markdown 代码块。"
             },
             new { role = "user", content = text }
         };
@@ -96,5 +97,21 @@ public sealed class OpenAiCompatibleTranslationService(HttpClient httpClient) : 
         }
 
         return new TranslationResult(text, translatedText, sourceLanguage, targetLanguage);
+    }
+
+    private static string BuildAutomaticSourceInstruction(string? sourceLanguageHint)
+    {
+        if (string.IsNullOrWhiteSpace(sourceLanguageHint))
+        {
+            return "先根据正文自动判断源语言；正文可能包含多种语言。";
+        }
+
+        var normalizedHint = sourceLanguageHint.Trim();
+        if (normalizedHint.Length > 32)
+        {
+            normalizedHint = normalizedHint[..32];
+        }
+
+        return $"先根据正文自动判断源语言；OCR 提供的语言线索是 {normalizedHint}，但它仅作为线索，若与正文不符应以正文为准，并允许正文包含多种语言。";
     }
 }

@@ -198,7 +198,7 @@
                             <ColumnDefinition Width="*" />
                         </Grid.ColumnDefinitions>
                         <StackPanel>
-                            <TextBlock Style="{StaticResource FieldLabelStyle}" Text="目标语言" />
+                            <TextBlock Style="{StaticResource FieldLabelStyle}" Text="目标语言（源语言自动检测）" />
                             <ComboBox x:Name="TargetLanguageComboBox"
                                       Height="36"
                                       IsEditable="True"
@@ -217,6 +217,44 @@
                                 <ComboBoxItem Content="1.5 秒" Tag="1500" />
                                 <ComboBoxItem Content="2.5 秒" Tag="2500" />
                             </ComboBox>
+                        </StackPanel>
+                    </Grid>
+
+                    <Grid Margin="0,16,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="2*" />
+                            <ColumnDefinition Width="16" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel>
+                            <TextBlock Style="{StaticResource FieldLabelStyle}" Text="译文字体" />
+                            <ComboBox x:Name="TranslationFontFamilyComboBox"
+                                      Height="36"
+                                      IsEditable="True"
+                                      IsTextSearchEnabled="True"
+                                      LostKeyboardFocus="TranslationFontFamilyComboBox_LostKeyboardFocus"
+                                      SelectionChanged="TranslationFontFamilyComboBox_SelectionChanged" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="2">
+                            <TextBlock Style="{StaticResource FieldLabelStyle}" Text="译文字号" />
+                            <Grid Height="36">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="38" />
+                                </Grid.ColumnDefinitions>
+                                <Slider x:Name="TranslationFontSizeSlider"
+                                        Minimum="10"
+                                        Maximum="48"
+                                        TickFrequency="1"
+                                        IsSnapToTickEnabled="True"
+                                        Value="18"
+                                        ValueChanged="TranslationFontSizeSlider_ValueChanged" />
+                                <TextBlock x:Name="TranslationFontSizeText"
+                                           Grid.Column="1"
+                                           HorizontalAlignment="Right"
+                                           VerticalAlignment="Center"
+                                           Foreground="{StaticResource MutedTextBrush}" />
+                            </Grid>
                         </StackPanel>
                     </Grid>
 

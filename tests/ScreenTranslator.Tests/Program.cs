@@ -128,6 +128,9 @@ internal static class Program
         panel.SetTranslation(translated);
         var textBlock = (TextBlock)panel.FindName("TranslationText");
         AssertEqual(translated, textBlock.Text);
+        panel.SetTypography("Arial", 22);
+        AssertEqual("Arial", textBlock.FontFamily.Source);
+        Assert(Math.Abs(textBlock.FontSize - 22) < 0.001, "Panel font size was not applied.");
         panel.AllowClose();
     }
 
@@ -141,6 +144,11 @@ internal static class Program
 
         var mainWindow = new ScreenTranslator.App.MainWindow();
         Assert(!mainWindow.Topmost, "The main control window must not cover other applications permanently.");
+        var fontFamily = (System.Windows.Controls.ComboBox)mainWindow.FindName("TranslationFontFamilyComboBox");
+        var fontSize = (Slider)mainWindow.FindName("TranslationFontSizeSlider");
+        Assert(fontFamily.IsEditable, "Users must be able to enter any installed translation font.");
+        Assert(fontSize.Minimum <= 10 && fontSize.Maximum >= 48,
+            "The translation font-size control must expose the supported range.");
     }
 
     private static void TestRegionSelectorWindow()
@@ -166,10 +174,13 @@ internal static class Program
 
         const string translated = "1. Alpha\n   2. Beta";
         overlay.SetTranslation(translated);
+        overlay.SetTypography("Arial", 20);
         overlay.SetRegion(new ScreenRegion(96, 96, 320, 180));
 
         var textBlock = (TextBlock)overlay.FindName("TranslationText");
         AssertEqual(translated, textBlock.Text);
+        AssertEqual("Arial", textBlock.FontFamily.Source);
+        Assert(Math.Abs(textBlock.FontSize - 20) < 0.001, "Overlay font size was not applied.");
         Assert(overlay.Width > 0 && overlay.Height > 0, "Overlay region must have a positive size.");
         overlay.Close();
     }
@@ -189,7 +200,11 @@ internal static class Program
             "deepseek-v4-flash",
             "unit-test-key"));
 
-        var result = await service.TranslateAsync(source, "auto", "zh-CN");
+        var result = await service.TranslateAsync(
+            source,
+            "auto",
+            "zh-CN",
+            sourceLanguageHint: "en-US");
         AssertEqual(source, result.SourceText);
         AssertEqual(translated, result.TranslatedText);
         AssertEqual("Bearer unit-test-key", handler.Authorization);
@@ -199,6 +214,11 @@ internal static class Program
         AssertEqual("disabled", root.GetProperty("thinking").GetProperty("type").GetString());
         AssertEqual(source, root.GetProperty("messages")[1].GetProperty("content").GetString());
         var prompt = root.GetProperty("messages")[0].GetProperty("content").GetString()!;
+        Assert(prompt.Contains("自动判断源语言", StringComparison.Ordinal),
+            "Automatic source-language detection must be explicit in the prompt.");
+        Assert(prompt.Contains("en-US", StringComparison.Ordinal) &&
+               prompt.Contains("仅作为线索", StringComparison.Ordinal),
+            "OCR language must be treated as a fallible hint.");
         Assert(prompt.Contains("空行", StringComparison.Ordinal), "Formatting prompt must preserve blank lines.");
         Assert(prompt.Contains("相对缩进", StringComparison.Ordinal), "Formatting prompt must preserve indentation.");
     }

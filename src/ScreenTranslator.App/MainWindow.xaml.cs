@@ -30,6 +30,7 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         _translationService = new OpenAiCompatibleTranslationService(_httpClient);
+        InitializeTranslationTypography();
 
         SourceInitialized += (_, _) => NativeWindowBehavior.ExcludeFromCapture(this);
         Closed += MainWindow_Closed;
@@ -155,17 +156,25 @@ public partial class MainWindow : Window
                 }
                 else if (_textChangeTracker.ShouldTranslate(recognized.Text))
                 {
-                    SetStatus("发现文字变化，正在翻译", $"OCR 语言：{recognized.DetectedLanguage ?? "自动"}", isError: false);
+                    var languageHint = recognized.DetectedLanguage is { Length: > 0 } hint
+                        ? $" · OCR 线索：{hint}"
+                        : string.Empty;
+                    var languageDetection = $"源语言：自动检测{languageHint}";
+                    SetStatus("发现文字变化，正在翻译", languageDetection, isError: false);
                     var translated = await _translationService.TranslateAsync(
                         recognized.Text,
                         "auto",
                         GetTargetLanguage(),
-                        cancellationToken);
+                        cancellationToken,
+                        recognized.DetectedLanguage);
 
                     _textChangeTracker.MarkTranslated(recognized.Text);
                     _lastTranslation = translated.TranslatedText;
                     ShowActiveOutput(translated.TranslatedText, region);
-                    SetStatus("实时翻译运行中", $"上次更新：{DateTime.Now:HH:mm:ss}", isError: false);
+                    SetStatus(
+                        "实时翻译运行中",
+                        $"{languageDetection} · 更新：{DateTime.Now:HH:mm:ss}",
+                        isError: false);
                 }
 
                 await Task.Delay(interval, cancellationToken);
@@ -256,6 +265,69 @@ public partial class MainWindow : Window
     {
         _overlayWindow.Opacity = e.NewValue;
         UpdateOverlayOpacityLabel();
+    }
+
+    private void InitializeTranslationTypography()
+    {
+        var installedFonts = Fonts.SystemFontFamilies
+            .OrderBy(font => font.Source, StringComparer.CurrentCultureIgnoreCase)
+            .ToArray();
+
+        TranslationFontFamilyComboBox.ItemsSource = installedFonts;
+        TranslationFontFamilyComboBox.SelectedItem = installedFonts.FirstOrDefault(font =>
+            font.Source.Equals("Microsoft YaHei UI", StringComparison.OrdinalIgnoreCase));
+
+        if (TranslationFontFamilyComboBox.SelectedItem is null)
+        {
+            TranslationFontFamilyComboBox.SelectedItem = installedFonts.FirstOrDefault();
+        }
+
+        if (TranslationFontFamilyComboBox.SelectedItem is null)
+        {
+            TranslationFontFamilyComboBox.Text = "Microsoft YaHei UI";
+        }
+
+        ApplyTranslationTypography();
+    }
+
+    private void TranslationFontFamilyComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        ApplyTranslationTypography();
+    }
+
+    private void TranslationFontFamilyComboBox_LostKeyboardFocus(
+        object sender,
+        System.Windows.Input.KeyboardFocusChangedEventArgs e)
+    {
+        ApplyTranslationTypography();
+    }
+
+    private void TranslationFontSizeSlider_ValueChanged(
+        object sender,
+        RoutedPropertyChangedEventArgs<double> e)
+    {
+        ApplyTranslationTypography();
+    }
+
+    private void ApplyTranslationTypography()
+    {
+        if (TranslationFontFamilyComboBox is null ||
+            TranslationFontSizeSlider is null ||
+            TranslationFontSizeText is null)
+        {
+            return;
+        }
+
+        var fontFamily = TranslationFontFamilyComboBox.Text.Trim();
+        if (string.IsNullOrWhiteSpace(fontFamily))
+        {
+            fontFamily = "Microsoft YaHei UI";
+        }
+
+        var fontSize = TranslationFontSizeSlider.Value;
+        _overlayWindow.SetTypography(fontFamily, fontSize);
+        _panelWindow.SetTypography(fontFamily, fontSize);
+        TranslationFontSizeText.Text = $"{fontSize:0}";
     }
 
     private void UpdateOverlayOpacityLabel()

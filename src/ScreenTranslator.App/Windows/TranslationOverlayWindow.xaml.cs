@@ -25,4 +25,12 @@ public partial class TranslationOverlayWindow : Window
     {
         TranslationText.Text = text;
     }
+
+    public void SetTypography(string fontFamily, double fontSize)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(fontFamily);
+        TranslationText.FontFamily = new System.Windows.Media.FontFamily(fontFamily);
+        TranslationText.FontSize = Math.Clamp(fontSize, 10, 48);
+        TranslationText.LineHeight = TranslationText.FontSize * 1.45;
+    }
 }
