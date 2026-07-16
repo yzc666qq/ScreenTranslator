@@ -8,6 +8,7 @@ ScreenTranslator 是一个 Windows 透明置顶实时翻译工具。它可以框
 - 本地屏幕截图与 Windows OCR；超大截图会缩放到 OCR 支持的尺寸。
 - 根据 OCR 单词坐标重建相对缩进、词间距和空行。
 - 自动判断源语言；OCR 语言仅作为模型线索，并支持多语言混排内容。
+- 检测明显仍为源语言的模型结果，并使用强化提示自动重试一次。
 - 仅当识别文字发生变化时调用翻译接口，减少延迟和模型费用。
 - 可编辑的 OpenAI 兼容接口地址和模型名称，默认配置 DeepSeek。
 - 两种置顶显示模式：
@@ -87,7 +88,7 @@ dotnet run --project tests/ScreenTranslator.Tests --configuration Debug
 dotnet run --project tests/ScreenTranslator.Tests --configuration Debug -- --screen-capture
 ```
 
-测试覆盖 OCR 格式重建、框选窗口范围、两种译文窗口、侧栏锁定和透明度、DeepSeek/通用 OpenAI 请求差异、响应空白保持、Windows OCR，以及真实屏幕截图到 OCR 的链路。
+测试覆盖 OCR 格式重建、框选窗口范围、两种译文窗口、侧栏锁定和透明度、目标语言解析、未翻译结果自动重试、DeepSeek/通用 OpenAI 请求差异、响应空白保持、Windows OCR，以及真实屏幕截图到 OCR 的链路。
 
 ## 当前边界
 

@@ -340,14 +340,32 @@ public partial class MainWindow : Window
 
     private string GetTargetLanguage()
     {
-        if (TargetLanguageComboBox.SelectedItem is ComboBoxItem item && item.Tag is string tag)
+        var visibleText = TargetLanguageComboBox.Text.Trim();
+
+        foreach (var option in TargetLanguageComboBox.Items.OfType<ComboBoxItem>())
         {
-            return tag;
+            if (option.Tag is not string tag)
+            {
+                continue;
+            }
+
+            var displayText = option.Content?.ToString();
+            if (visibleText.Equals(displayText, StringComparison.CurrentCultureIgnoreCase) ||
+                visibleText.Equals(tag, StringComparison.OrdinalIgnoreCase))
+            {
+                return tag;
+            }
         }
 
-        return string.IsNullOrWhiteSpace(TargetLanguageComboBox.Text)
-            ? "zh-CN"
-            : TargetLanguageComboBox.Text.Trim();
+        if (!string.IsNullOrWhiteSpace(visibleText))
+        {
+            return visibleText;
+        }
+
+        return TargetLanguageComboBox.SelectedItem is ComboBoxItem selectedItem &&
+               selectedItem.Tag is string selectedTag
+            ? selectedTag
+            : "zh-CN";
     }
 
     private TimeSpan GetSelectedInterval()

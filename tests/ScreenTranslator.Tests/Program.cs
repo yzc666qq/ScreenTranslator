@@ -27,6 +27,7 @@ internal static class Program
         Run("Side panel supports locking, resizing and opacity", TestSidePanelControls);
         Run("Overlay preserves translated text and region", TestOverlayWindow);
         Run("DeepSeek adapter preserves formatting", () => TestDeepSeekAdapterAsync().GetAwaiter().GetResult());
+        Run("Untranslated output retries once", () => TestUntranslatedOutputRetryAsync().GetAwaiter().GetResult());
         Run("Generic OpenAI adapter omits DeepSeek-only fields", () => TestGenericAdapterAsync().GetAwaiter().GetResult());
         Run("Windows OCR recognizes a synthetic image", () => TestWindowsOcrAsync().GetAwaiter().GetResult());
 
@@ -149,6 +150,14 @@ internal static class Program
         Assert(fontFamily.IsEditable, "Users must be able to enter any installed translation font.");
         Assert(fontSize.Minimum <= 10 && fontSize.Maximum >= 48,
             "The translation font-size control must expose the supported range.");
+
+        var targetLanguage = (System.Windows.Controls.ComboBox)mainWindow.FindName("TargetLanguageComboBox");
+        targetLanguage.SelectedIndex = 1;
+        targetLanguage.Text = "简体中文";
+        var getTargetLanguage = typeof(ScreenTranslator.App.MainWindow).GetMethod(
+            "GetTargetLanguage",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+        AssertEqual("zh-CN", getTargetLanguage.Invoke(mainWindow, null)?.ToString());
     }
 
     private static void TestRegionSelectorWindow()
@@ -242,6 +251,42 @@ internal static class Program
         using var document = JsonDocument.Parse(handler.RequestBody!);
         Assert(!document.RootElement.TryGetProperty("thinking", out _),
             "Generic OpenAI-compatible requests must omit DeepSeek-only thinking fields.");
+    }
+
+    private static async Task TestUntranslatedOutputRetryAsync()
+    {
+        var responseIndex = 0;
+        var handler = new RecordingHandler(_ => JsonResponse(new
+        {
+            choices = new[]
+            {
+                new
+                {
+                    message = new
+                    {
+                        content = responseIndex++ == 0 ? "Open settings" : "打开设置"
+                    }
+                }
+            }
+        }));
+        using var client = new HttpClient(handler);
+        var service = new OpenAiCompatibleTranslationService(client);
+        service.Configure(new TranslationProviderOptions(
+            new Uri("https://example.test/v1/chat/completions"),
+            "compatible-model",
+            "unit-test-key"));
+
+        var result = await service.TranslateAsync("Open settings", "auto", "zh-CN");
+
+        AssertEqual("打开设置", result.TranslatedText);
+        AssertEqual(2, handler.RequestCount);
+        using var document = JsonDocument.Parse(handler.RequestBody!);
+        var prompt = document.RootElement
+            .GetProperty("messages")[0]
+            .GetProperty("content")
+            .GetString()!;
+        Assert(prompt.Contains("上一版可能仍是源语言", StringComparison.Ordinal),
+            "The retry must use an explicit corrective translation prompt.");
     }
 
     private static async Task TestWindowsOcrAsync()
@@ -384,6 +429,8 @@ internal static class Program
 
         public string? Authorization { get; private set; }
 
+        public int RequestCount { get; private set; }
+
         protected override async Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,
             CancellationToken cancellationToken)
@@ -392,6 +439,7 @@ internal static class Program
                 ? null
                 : await request.Content.ReadAsStringAsync(cancellationToken);
             Authorization = request.Headers.Authorization?.ToString();
+            RequestCount++;
             return responseFactory(request);
         }
     }
