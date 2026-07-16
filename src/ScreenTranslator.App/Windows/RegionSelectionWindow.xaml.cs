@@ -76,17 +76,31 @@ public partial class RegionSelectionWindow : Window
         DialogResult = true;
     }
 
-    private void RootCanvas_MouseRightButtonUp(object sender, MouseButtonEventArgs e)
+    private void Window_PreviewMouseRightButtonDown(object sender, MouseButtonEventArgs e)
     {
-        DialogResult = false;
+        CancelSelection();
+        e.Handled = true;
     }
 
     private void Window_PreviewKeyDown(object sender, KeyEventArgs e)
     {
         if (e.Key == Key.Escape)
         {
-            DialogResult = false;
+            CancelSelection();
+            e.Handled = true;
         }
+    }
+
+    private void CancelSelection()
+    {
+        _isSelecting = false;
+
+        if (RootCanvas.IsMouseCaptured)
+        {
+            RootCanvas.ReleaseMouseCapture();
+        }
+
+        DialogResult = false;
     }
 
     private void UpdateSelection(Point currentPoint)

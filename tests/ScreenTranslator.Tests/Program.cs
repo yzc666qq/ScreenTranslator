@@ -110,8 +110,11 @@ internal static class Program
     private static void TestRegionSelectorWindow()
     {
         var selector = new RegionSelectionWindow();
+        var canvas = (Canvas)selector.FindName("RootCanvas");
         Assert(selector.Topmost, "Region selector must stay above other windows while selecting.");
         Assert(selector.AllowsTransparency, "Region selector must be transparent.");
+        Assert(canvas.Background is not null,
+            "The full selector canvas must be hit-testable so drag and right-click input works anywhere.");
         Assert(selector.Width >= System.Windows.SystemParameters.VirtualScreenWidth - 1,
             "Region selector must cover the virtual desktop width.");
         Assert(selector.Height >= System.Windows.SystemParameters.VirtualScreenHeight - 1,
