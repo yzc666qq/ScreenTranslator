@@ -17,6 +17,7 @@ public partial class MainWindow : Window
     private readonly HttpClient _httpClient = new() { Timeout = TimeSpan.FromSeconds(45) };
     private readonly TranslationOverlayWindow _overlayWindow = new();
     private readonly TranslationPanelWindow _panelWindow = new();
+    private readonly RegionIndicatorWindow _regionIndicatorWindow = new();
     private readonly OpenAiCompatibleTranslationService _translationService;
     private readonly RecognizedTextChangeTracker _textChangeTracker = new();
 
@@ -58,6 +59,7 @@ public partial class MainWindow : Window
         await StopTranslationAsync();
         _overlayWindow.Hide();
         _panelWindow.Hide();
+        _regionIndicatorWindow.Hide();
 
         SetStatus("请拖动鼠标框选翻译区域", "按 Esc 或鼠标右键取消", isError: false);
         Hide();
@@ -71,6 +73,11 @@ public partial class MainWindow : Window
 
         if (!accepted || selector.SelectedRegion is not { } region)
         {
+            if (_selectedRegion is { } existingRegion)
+            {
+                ShowRegionIndicator(existingRegion);
+            }
+
             SetStatus("已取消框选", "原有区域保持不变", isError: false);
             return;
         }
@@ -78,6 +85,7 @@ public partial class MainWindow : Window
         _selectedRegion = region;
         RegionText.Text = $"X {region.X}, Y {region.Y}, {region.Width} × {region.Height} px";
         _overlayWindow.SetRegion(region);
+        ShowRegionIndicator(region);
         PlacePanelNextTo(region);
         SetStatus("区域已选择", "配置模型后即可开始实时翻译", isError: false);
     }
@@ -392,6 +400,16 @@ public partial class MainWindow : Window
         _panelWindow.Top = Math.Clamp(bounds.Top, workArea.Top, Math.Max(workArea.Top, workArea.Bottom - _panelWindow.Height));
     }
 
+    private void ShowRegionIndicator(ScreenRegion region)
+    {
+        _regionIndicatorWindow.SetRegion(region);
+
+        if (!_regionIndicatorWindow.IsVisible)
+        {
+            _regionIndicatorWindow.Show();
+        }
+    }
+
     private void SetStatus(string title, string detail, bool isError)
     {
         StatusText.Text = title;
@@ -415,6 +433,7 @@ public partial class MainWindow : Window
     {
         _runCancellation?.Cancel();
         _overlayWindow.Close();
+        _regionIndicatorWindow.Close();
         _panelWindow.AllowClose();
         _httpClient.Dispose();
         System.Windows.Application.Current.Shutdown();

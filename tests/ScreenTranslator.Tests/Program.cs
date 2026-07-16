@@ -24,6 +24,7 @@ internal static class Program
         Run("Unchanged OCR text is not translated twice", TestRecognizedTextChangeTracking);
         Run("Main controls do not stay topmost", TestMainWindowLayering);
         Run("Region selector covers the virtual desktop", TestRegionSelectorWindow);
+        Run("Selected region indicator is transparent and subtle", TestRegionIndicatorWindow);
         Run("Side panel supports locking, resizing and opacity", TestSidePanelControls);
         Run("Overlay preserves translated text and region", TestOverlayWindow);
         Run("DeepSeek adapter preserves formatting", () => TestDeepSeekAdapterAsync().GetAwaiter().GetResult());
@@ -173,6 +174,27 @@ internal static class Program
         Assert(selector.Height >= System.Windows.SystemParameters.VirtualScreenHeight - 1,
             "Region selector must cover the virtual desktop height.");
         selector.Close();
+    }
+
+    private static void TestRegionIndicatorWindow()
+    {
+        var indicator = new RegionIndicatorWindow();
+        var border = (Border)indicator.FindName("IndicatorBorder");
+        var windowBackground = (System.Windows.Media.SolidColorBrush)indicator.Background;
+        var borderBrush = (System.Windows.Media.SolidColorBrush)border.BorderBrush;
+
+        Assert(indicator.Topmost, "The selected-region indicator must remain visible above the source app.");
+        Assert(!indicator.ShowActivated && !indicator.Focusable,
+            "The selected-region indicator must not steal focus.");
+        Assert(windowBackground.Color.A == 0 && border.Background is null,
+            "The selected-region indicator interior must be completely transparent.");
+        Assert(border.BorderThickness.Left <= 1 && borderBrush.Color.A is > 0 and <= 0x40,
+            "The selected-region border must be a barely visible thin line.");
+
+        indicator.SetRegion(new ScreenRegion(96, 96, 320, 180));
+        Assert(indicator.Width > 0 && indicator.Height > 0,
+            "The selected-region indicator must map to a positive display area.");
+        indicator.Close();
     }
 
     private static void TestOverlayWindow()

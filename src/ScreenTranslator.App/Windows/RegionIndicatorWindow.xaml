@@ -1,0 +1,17 @@
+<Window x:Class="ScreenTranslator.App.Windows.RegionIndicatorWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        AllowsTransparency="True"
+        Background="Transparent"
+        Focusable="False"
+        ResizeMode="NoResize"
+        ShowActivated="False"
+        ShowInTaskbar="False"
+        Topmost="True"
+        WindowStyle="None">
+    <Border x:Name="IndicatorBorder"
+            Background="{x:Null}"
+            BorderBrush="#388D75FF"
+            BorderThickness="1"
+            IsHitTestVisible="False" />
+</Window>
