@@ -1,0 +1,129 @@
+﻿<Window x:Class="ScreenTranslator.App.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Screen Translator"
+        Width="420"
+        Height="230"
+        AllowsTransparency="True"
+        Background="Transparent"
+        ResizeMode="NoResize"
+        Topmost="True"
+        WindowStartupLocation="CenterScreen"
+        WindowStyle="None">
+    <Window.Resources>
+        <Style x:Key="IconButtonStyle" TargetType="Button">
+            <Setter Property="Width" Value="30" />
+            <Setter Property="Height" Value="30" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Foreground" Value="{StaticResource MutedTextBrush}" />
+            <Setter Property="FontSize" Value="16" />
+            <Setter Property="Cursor" Value="Hand" />
+        </Style>
+    </Window.Resources>
+
+    <Border Margin="8"
+            Padding="20"
+            Background="{StaticResource SurfaceBrush}"
+            BorderBrush="#33FFFFFF"
+            BorderThickness="1"
+            CornerRadius="18">
+        <Border.Effect>
+            <DropShadowEffect BlurRadius="22"
+                              Opacity="0.35"
+                              ShadowDepth="5" />
+        </Border.Effect>
+
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <Grid Grid.Row="0" MouseLeftButtonDown="Header_MouseLeftButtonDown">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <Border Width="34"
+                            Height="34"
+                            Margin="0,0,12,0"
+                            Background="{StaticResource AccentBrush}"
+                            CornerRadius="10">
+                        <TextBlock HorizontalAlignment="Center"
+                                   VerticalAlignment="Center"
+                                   FontSize="18"
+                                   FontWeight="SemiBold"
+                                   Foreground="White"
+                                   Text="译" />
+                    </Border>
+                    <StackPanel>
+                        <TextBlock FontSize="16"
+                                   FontWeight="SemiBold"
+                                   Foreground="White"
+                                   Text="Screen Translator" />
+                        <TextBlock FontSize="12"
+                                   Foreground="{StaticResource MutedTextBrush}"
+                                   Text="透明悬浮实时翻译" />
+                    </StackPanel>
+                </StackPanel>
+
+                <Button Grid.Column="1"
+                        Click="CloseButton_Click"
+                        Content="×"
+                        Style="{StaticResource IconButtonStyle}"
+                        ToolTip="关闭" />
+            </Grid>
+
+            <Border Grid.Row="1"
+                    Margin="0,18,0,16"
+                    Padding="14,12"
+                    Background="#14FFFFFF"
+                    CornerRadius="10">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+
+                    <Ellipse Width="8"
+                             Height="8"
+                             Margin="0,0,10,0"
+                             Fill="#FF58D68D" />
+                    <StackPanel Grid.Column="1">
+                        <TextBlock x:Name="StatusText"
+                                   Foreground="White"
+                                   Text="项目框架已就绪" />
+                        <TextBlock Margin="0,3,0,0"
+                                   FontSize="11"
+                                   Foreground="{StaticResource MutedTextBrush}"
+                                   Text="下一阶段接入区域截图、OCR 与翻译服务" />
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <Button Grid.Row="2"
+                    Height="40"
+                    Click="ToggleSelectionButton_Click"
+                    Background="{StaticResource AccentBrush}"
+                    BorderThickness="0"
+                    Cursor="Hand"
+                    Foreground="White"
+                    FontWeight="SemiBold">
+                <Button.Template>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}"
+                                CornerRadius="10">
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center" />
+                        </Border>
+                    </ControlTemplate>
+                </Button.Template>
+                <TextBlock x:Name="SelectionButtonText" Text="准备框选" />
+            </Button>
+        </Grid>
+    </Border>
+</Window>
