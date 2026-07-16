@@ -31,6 +31,7 @@ public partial class MainWindow : Window
     private readonly TranslationOverlayWindow _overlayWindow = new();
     private readonly TranslationPanelWindow _panelWindow = new();
     private readonly RegionIndicatorWindow _regionIndicatorWindow = new();
+    private readonly GlobalHotkeyManager _globalHotkeyManager = new();
     private readonly OpenAiCompatibleTranslationService _translationService;
     private readonly RecognizedTextChangeTracker _textChangeTracker = new();
 
@@ -39,6 +40,7 @@ public partial class MainWindow : Window
     private CancellationTokenSource? _runCancellation;
     private Task? _runTask;
     private string? _lastTranslation;
+    private bool _isSelectingRegion;
 
     public MainWindow()
     {
@@ -46,7 +48,7 @@ public partial class MainWindow : Window
         _translationService = new OpenAiCompatibleTranslationService(_httpClient);
         InitializeTranslationTypography();
 
-        SourceInitialized += (_, _) => NativeWindowBehavior.ExcludeFromCapture(this);
+        SourceInitialized += MainWindow_SourceInitialized;
         Closed += MainWindow_Closed;
 
         var environmentKey = Environment.GetEnvironmentVariable("DEEPSEEK_API_KEY");
@@ -69,38 +71,74 @@ public partial class MainWindow : Window
 
     private async void SelectRegionButton_Click(object sender, RoutedEventArgs e)
     {
-        await StopTranslationAsync();
-        _overlayWindow.Hide();
-        _panelWindow.Hide();
-        _regionIndicatorWindow.Hide();
+        await SelectRegionAsync();
+    }
 
-        SetStatus("请拖动鼠标框选翻译区域", "按 Esc 或鼠标右键取消", isError: false);
-        Hide();
-        await Dispatcher.InvokeAsync(() => { }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
-
-        var selector = new RegionSelectionWindow();
-        var accepted = selector.ShowDialog() == true;
-
-        Show();
-        Activate();
-
-        if (!accepted || selector.SelectedRegion is not { } region)
+    private async Task SelectRegionAsync()
+    {
+        if (_isSelectingRegion)
         {
-            if (_selectedRegion is { } existingRegion)
-            {
-                ShowRegionIndicator(existingRegion);
-            }
-
-            SetStatus("已取消框选", "原有区域保持不变", isError: false);
             return;
         }
 
-        _selectedRegion = region;
-        RegionText.Text = $"X {region.X}, Y {region.Y}, {region.Width} × {region.Height} px";
-        _overlayWindow.SetRegion(region);
-        ShowRegionIndicator(region);
-        PlacePanelNextTo(region);
-        SetStatus("区域已选择", "配置模型后即可开始实时翻译", isError: false);
+        _isSelectingRegion = true;
+        var resumeTranslation = _runCancellation is not null;
+
+        try
+        {
+            await StopTranslationAsync();
+            _overlayWindow.Hide();
+            _panelWindow.Hide();
+            _regionIndicatorWindow.Hide();
+
+            SetStatus("请拖动鼠标框选翻译区域", "按 Esc 或鼠标右键取消", isError: false);
+            Hide();
+            await Dispatcher.InvokeAsync(() => { }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+
+            var selector = new RegionSelectionWindow();
+            var accepted = selector.ShowDialog() == true;
+
+            Show();
+            Activate();
+
+            if (!accepted || selector.SelectedRegion is not { } region)
+            {
+                if (_selectedRegion is { } existingRegion)
+                {
+                    ShowRegionIndicator(existingRegion);
+                }
+
+                if (resumeTranslation)
+                {
+                    StartTranslation();
+                }
+                else
+                {
+                    SetStatus("已取消框选", "原有区域保持不变", isError: false);
+                }
+
+                return;
+            }
+
+            _selectedRegion = region;
+            RegionText.Text = $"X {region.X}, Y {region.Y}, {region.Width} × {region.Height} px";
+            _overlayWindow.SetRegion(region);
+            ShowRegionIndicator(region);
+            PlacePanelNextTo(region);
+
+            if (resumeTranslation)
+            {
+                StartTranslation();
+            }
+            else
+            {
+                SetStatus("区域已选择", "配置模型后即可开始实时翻译", isError: false);
+            }
+        }
+        finally
+        {
+            _isSelectingRegion = false;
+        }
     }
 
     private async void StartStopButton_Click(object sender, RoutedEventArgs e)
@@ -239,6 +277,59 @@ public partial class MainWindow : Window
         if (IsLoaded)
         {
             SetStatus("实时翻译已停止", "译文窗口保留，可重新启动", isError: false);
+        }
+    }
+
+    private async Task ExitTranslationModeAsync()
+    {
+        await StopTranslationAsync();
+        _overlayWindow.Hide();
+        _panelWindow.Hide();
+        _lastTranslation = null;
+        SetStatus("已退出实时翻译", "按 F1 可重选区域，或点击开始按钮重新启动", isError: false);
+    }
+
+    private void MainWindow_SourceInitialized(object? sender, EventArgs e)
+    {
+        NativeWindowBehavior.ExcludeFromCapture(this);
+        _globalHotkeyManager.Pressed += GlobalHotkeyManager_Pressed;
+
+        try
+        {
+            var unavailableHotkeys = _globalHotkeyManager.Register(this);
+            if (unavailableHotkeys.Count > 0)
+            {
+                SetStatus(
+                    "部分快捷键不可用",
+                    $"{string.Join("、", unavailableHotkeys)} 已被其他程序占用，仍可使用窗口按钮",
+                    isError: true);
+            }
+        }
+        catch (Exception exception)
+        {
+            SetStatus("快捷键初始化失败", exception.Message, isError: true);
+        }
+    }
+
+    private async void GlobalHotkeyManager_Pressed(GlobalHotkeyCommand command)
+    {
+        try
+        {
+            switch (command)
+            {
+                case GlobalHotkeyCommand.ReselectRegion:
+                    await SelectRegionAsync();
+                    break;
+                case GlobalHotkeyCommand.StopTranslation:
+                    await ExitTranslationModeAsync();
+                    break;
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(command), command, null);
+            }
+        }
+        catch (Exception exception)
+        {
+            SetStatus("快捷键操作失败", exception.Message, isError: true);
         }
     }
 
@@ -436,6 +527,8 @@ public partial class MainWindow : Window
 
     private void MainWindow_Closed(object? sender, EventArgs e)
     {
+        _globalHotkeyManager.Pressed -= GlobalHotkeyManager_Pressed;
+        _globalHotkeyManager.Dispose();
         _runCancellation?.Cancel();
         _overlayWindow.Close();
         _regionIndicatorWindow.Close();

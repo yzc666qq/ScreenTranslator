@@ -180,7 +180,8 @@
                                     Background="#20FFFFFF"
                                     BorderBrush="#35FFFFFF"
                                     Foreground="White"
-                                    Content="框选区域" />
+                                    Content="框选区域"
+                                    ToolTip="F1：重选区域" />
                             <TextBlock x:Name="RegionText"
                                        Margin="0,5,0,0"
                                        FontSize="11"
@@ -343,13 +344,22 @@
                                 Background="#20FFFFFF"
                                 BorderBrush="#35FFFFFF"
                                 Foreground="White"
-                                Content="重新框选" />
+                                Content="重新框选 · F1"
+                                ToolTip="运行中按 F1 会在重选后继续翻译" />
                         <Button x:Name="StartStopButton"
                                 Grid.Column="2"
                                 Click="StartStopButton_Click"
                                 Content="开始实时翻译"
+                                ToolTip="F2：停止翻译并隐藏译文"
                                 Style="{StaticResource PrimaryButtonStyle}" />
                     </Grid>
+
+                    <TextBlock x:Name="ShortcutHelpText"
+                               Margin="0,10,0,0"
+                               HorizontalAlignment="Center"
+                               FontSize="11"
+                               Foreground="{StaticResource MutedTextBrush}"
+                               Text="全局快捷键：F1 重选区域 · F2 停止并隐藏译文" />
                 </StackPanel>
             </ScrollViewer>
         </Grid>

@@ -6,6 +6,7 @@ using System.Text;
 using System.Text.Json;
 using System.Windows.Controls;
 using ScreenTranslator.App.Core;
+using ScreenTranslator.App.Interop;
 using ScreenTranslator.App.Services;
 using ScreenTranslator.App.Windows;
 using WpfResizeMode = System.Windows.ResizeMode;
@@ -22,6 +23,7 @@ internal static class Program
     {
         Run("OCR layout preserves indentation and blank lines", TestOcrLayoutFormatting);
         Run("Unchanged OCR text is not translated twice", TestRecognizedTextChangeTracking);
+        Run("Global F1 and F2 hotkeys map to translation commands", TestGlobalHotkeyMapping);
         Run("Main controls do not stay topmost", TestMainWindowLayering);
         Run("Region selector covers the virtual desktop", TestRegionSelectorWindow);
         Run("Selected region indicator is transparent and subtle", TestRegionIndicatorWindow);
@@ -87,6 +89,23 @@ internal static class Program
         Assert(tracker.ShouldTranslate("first"), "Starting a new run must reset deduplication state.");
     }
 
+    private static void TestGlobalHotkeyMapping()
+    {
+        Assert(GlobalHotkeyManager.TryGetCommand(
+                GlobalHotkeyManager.ReselectRegionId,
+                out var reselectCommand),
+            "F1 hotkey id must resolve to a command.");
+        AssertEqual(GlobalHotkeyCommand.ReselectRegion, reselectCommand);
+
+        Assert(GlobalHotkeyManager.TryGetCommand(
+                GlobalHotkeyManager.StopTranslationId,
+                out var stopCommand),
+            "F2 hotkey id must resolve to a command.");
+        AssertEqual(GlobalHotkeyCommand.StopTranslation, stopCommand);
+        Assert(!GlobalHotkeyManager.TryGetCommand(-1, out _),
+            "Unknown hotkey ids must be ignored.");
+    }
+
     private static void TestSidePanelControls()
     {
         var panel = new TranslationPanelWindow();
@@ -150,6 +169,10 @@ internal static class Program
         Assert(!mainWindow.Topmost, "The main control window must not cover other applications permanently.");
         var fontFamily = (System.Windows.Controls.ComboBox)mainWindow.FindName("TranslationFontFamilyComboBox");
         var fontSize = (Slider)mainWindow.FindName("TranslationFontSizeSlider");
+        var shortcutHelp = (TextBlock)mainWindow.FindName("ShortcutHelpText");
+        Assert(shortcutHelp.Text.Contains("F1", StringComparison.Ordinal) &&
+               shortcutHelp.Text.Contains("F2", StringComparison.Ordinal),
+            "The main window must explain both global hotkeys.");
         Assert(!fontFamily.IsEditable, "The font picker must stay limited to curated preview choices.");
         Assert(fontFamily.Items.Count is >= 1 and <= 8,
             "The font picker must expose no more than eight common installed fonts.");
