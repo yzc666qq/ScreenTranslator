@@ -56,6 +56,19 @@
             <Setter Property="Foreground" Value="White" />
             <Setter Property="CaretBrush" Value="White" />
         </Style>
+
+        <DataTemplate x:Key="FontPreviewTemplate">
+            <StackPanel Orientation="Horizontal">
+                <TextBlock FontFamily="{Binding FontFamily}"
+                           FontSize="17"
+                           Text="{Binding DisplayName}" />
+                <TextBlock Margin="12,0,0,0"
+                           FontFamily="{Binding FontFamily}"
+                           FontSize="15"
+                           Foreground="{StaticResource MutedTextBrush}"
+                           Text="译文 Aa 123" />
+            </StackPanel>
+        </DataTemplate>
     </Window.Resources>
 
     <Border Margin="8"
@@ -230,9 +243,10 @@
                             <TextBlock Style="{StaticResource FieldLabelStyle}" Text="译文字体" />
                             <ComboBox x:Name="TranslationFontFamilyComboBox"
                                       Height="36"
-                                      IsEditable="True"
+                                      IsEditable="False"
                                       IsTextSearchEnabled="True"
-                                      LostKeyboardFocus="TranslationFontFamilyComboBox_LostKeyboardFocus"
+                                      ItemTemplate="{StaticResource FontPreviewTemplate}"
+                                      MaxDropDownHeight="300"
                                       SelectionChanged="TranslationFontFamilyComboBox_SelectionChanged" />
                         </StackPanel>
                         <StackPanel Grid.Column="2">

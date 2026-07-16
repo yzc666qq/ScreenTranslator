@@ -150,7 +150,32 @@ internal static class Program
         Assert(!mainWindow.Topmost, "The main control window must not cover other applications permanently.");
         var fontFamily = (System.Windows.Controls.ComboBox)mainWindow.FindName("TranslationFontFamilyComboBox");
         var fontSize = (Slider)mainWindow.FindName("TranslationFontSizeSlider");
-        Assert(fontFamily.IsEditable, "Users must be able to enter any installed translation font.");
+        Assert(!fontFamily.IsEditable, "The font picker must stay limited to curated preview choices.");
+        Assert(fontFamily.Items.Count is >= 1 and <= 8,
+            "The font picker must expose no more than eight common installed fonts.");
+        var previewTemplate = fontFamily.ItemTemplate;
+        Assert(previewTemplate is not null, "Font choices must use a visual preview template.");
+
+        foreach (var fontOption in fontFamily.Items)
+        {
+            var optionType = fontOption.GetType();
+            var displayName = optionType.GetProperty("DisplayName")!.GetValue(fontOption)?.ToString();
+            var optionFontFamily = (System.Windows.Media.FontFamily)optionType
+                .GetProperty("FontFamily")!
+                .GetValue(fontOption)!;
+            var preview = (StackPanel)previewTemplate!.LoadContent();
+            preview.DataContext = fontOption;
+            preview.Dispatcher.Invoke(
+                () => { },
+                System.Windows.Threading.DispatcherPriority.DataBind);
+            var previewName = (TextBlock)preview.Children[0];
+            var previewSample = (TextBlock)preview.Children[1];
+            AssertEqual(displayName, previewName.Text);
+            AssertEqual(optionFontFamily.Source, previewName.FontFamily.Source);
+            AssertEqual(optionFontFamily.Source, previewSample.FontFamily.Source);
+            Assert(previewSample.Text.Contains("译文", StringComparison.Ordinal),
+                "Each font option must include a readable translation sample.");
+        }
         Assert(fontSize.Minimum <= 10 && fontSize.Maximum >= 48,
             "The translation font-size control must expose the supported range.");
 

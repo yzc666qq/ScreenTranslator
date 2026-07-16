@@ -8,11 +8,24 @@ using ScreenTranslator.App.Interop;
 using ScreenTranslator.App.Services;
 using ScreenTranslator.App.Windows;
 using Color = System.Windows.Media.Color;
+using WpfFontFamily = System.Windows.Media.FontFamily;
 
 namespace ScreenTranslator.App;
 
 public partial class MainWindow : Window
 {
+    private static readonly (string FontFamilyName, string DisplayName)[] PreferredTranslationFonts =
+    [
+        ("Microsoft YaHei UI", "微软雅黑"),
+        ("DengXian", "等线"),
+        ("SimSun", "宋体"),
+        ("SimHei", "黑体"),
+        ("KaiTi", "楷体"),
+        ("FangSong", "仿宋"),
+        ("Arial", "Arial"),
+        ("Times New Roman", "Times New Roman")
+    ];
+
     private readonly IScreenCaptureService _screenCaptureService = new GdiScreenCaptureService();
     private readonly HttpClient _httpClient = new() { Timeout = TimeSpan.FromSeconds(45) };
     private readonly TranslationOverlayWindow _overlayWindow = new();
@@ -274,34 +287,30 @@ public partial class MainWindow : Window
     private void InitializeTranslationTypography()
     {
         var installedFonts = Fonts.SystemFontFamilies
-            .OrderBy(font => font.Source, StringComparer.CurrentCultureIgnoreCase)
+            .GroupBy(font => font.Source, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
+        var previewOptions = PreferredTranslationFonts
+            .Where(option => installedFonts.ContainsKey(option.FontFamilyName))
+            .Select(option => new FontPreviewOption(
+                option.DisplayName,
+                installedFonts[option.FontFamilyName]))
             .ToArray();
 
-        TranslationFontFamilyComboBox.ItemsSource = installedFonts;
-        TranslationFontFamilyComboBox.SelectedItem = installedFonts.FirstOrDefault(font =>
-            font.Source.Equals("Microsoft YaHei UI", StringComparison.OrdinalIgnoreCase));
-
-        if (TranslationFontFamilyComboBox.SelectedItem is null)
+        if (previewOptions.Length == 0)
         {
-            TranslationFontFamilyComboBox.SelectedItem = installedFonts.FirstOrDefault();
+            previewOptions =
+            [
+                new FontPreviewOption("系统默认", new WpfFontFamily("Microsoft YaHei UI"))
+            ];
         }
 
-        if (TranslationFontFamilyComboBox.SelectedItem is null)
-        {
-            TranslationFontFamilyComboBox.Text = "Microsoft YaHei UI";
-        }
+        TranslationFontFamilyComboBox.ItemsSource = previewOptions;
+        TranslationFontFamilyComboBox.SelectedIndex = 0;
 
         ApplyTranslationTypography();
     }
 
     private void TranslationFontFamilyComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
-    {
-        ApplyTranslationTypography();
-    }
-
-    private void TranslationFontFamilyComboBox_LostKeyboardFocus(
-        object sender,
-        System.Windows.Input.KeyboardFocusChangedEventArgs e)
     {
         ApplyTranslationTypography();
     }
@@ -322,17 +331,17 @@ public partial class MainWindow : Window
             return;
         }
 
-        var fontFamily = TranslationFontFamilyComboBox.Text.Trim();
-        if (string.IsNullOrWhiteSpace(fontFamily))
-        {
-            fontFamily = "Microsoft YaHei UI";
-        }
+        var fontFamily = TranslationFontFamilyComboBox.SelectedItem is FontPreviewOption selectedFont
+            ? selectedFont.FontFamily.Source
+            : "Microsoft YaHei UI";
 
         var fontSize = TranslationFontSizeSlider.Value;
         _overlayWindow.SetTypography(fontFamily, fontSize);
         _panelWindow.SetTypography(fontFamily, fontSize);
         TranslationFontSizeText.Text = $"{fontSize:0}";
     }
+
+    private sealed record FontPreviewOption(string DisplayName, WpfFontFamily FontFamily);
 
     private void UpdateOverlayOpacityLabel()
     {
