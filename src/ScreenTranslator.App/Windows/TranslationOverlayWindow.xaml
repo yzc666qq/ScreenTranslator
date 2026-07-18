@@ -7,7 +7,12 @@
         ResizeMode="NoResize"
         ShowActivated="False"
         ShowInTaskbar="False"
+        SnapsToDevicePixels="True"
+        TextOptions.TextFormattingMode="Display"
+        TextOptions.TextHintingMode="Fixed"
+        TextOptions.TextRenderingMode="Grayscale"
         Topmost="True"
+        UseLayoutRounding="True"
         WindowStyle="None">
     <Border x:Name="OverlaySurface"
             Padding="12"
@@ -15,8 +20,10 @@
             BorderBrush="#5932414D"
             BorderThickness="1"
             CornerRadius="10">
-        <ScrollViewer HorizontalScrollBarVisibility="Disabled"
-                      VerticalScrollBarVisibility="Auto">
+        <ScrollViewer x:Name="TranslationScrollViewer"
+                      HorizontalScrollBarVisibility="Disabled"
+                      PanningMode="VerticalOnly"
+                      VerticalScrollBarVisibility="Hidden">
             <TextBlock x:Name="TranslationText"
                        FontFamily="Cascadia Mono, Consolas, Microsoft YaHei UI"
                        FontSize="18"

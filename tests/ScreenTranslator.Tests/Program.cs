@@ -27,6 +27,7 @@ internal static class Program
         Run("Unchanged OCR text is not translated twice", TestRecognizedTextChangeTracking);
         Run("Global F1 and F2 hotkeys map to translation commands", TestGlobalHotkeyMapping);
         Run("Main controls do not stay topmost", TestMainWindowLayering);
+        Run("Windows use sharp DPI-aware rendering without visible scrollbars", TestSharpRenderingSettings);
         Run("Region selector covers the virtual desktop", TestRegionSelectorWindow);
         Run("Selected region indicator is transparent and subtle", TestRegionIndicatorWindow);
         Run("Side panel supports locking, resizing and opacity", TestSidePanelControls);
@@ -155,10 +156,14 @@ internal static class Program
     {
         var panel = new TranslationPanelWindow();
         Assert(panel.Topmost, "Side panel must stay topmost.");
+        Assert(!panel.AllowsTransparency,
+            "The side panel must use a native window surface so translated text can use ClearType.");
         AssertEqual(WpfResizeMode.CanResizeWithGrip, panel.ResizeMode);
         var panelSurface = (Border)panel.FindName("PanelSurface");
         Assert(panelSurface.CornerRadius.TopLeft >= 10,
             "The redesigned side panel must use a clean rounded surface.");
+        Assert(Math.Abs(panel.Opacity - 1) < 0.001,
+            "The side panel must start fully opaque for maximum text contrast.");
 
         var controlDock = (Border)panel.FindName("ControlDock");
         Assert(controlDock.Opacity < 0.25,
@@ -270,6 +275,47 @@ internal static class Program
             "GetTargetLanguage",
             System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
         AssertEqual("zh-CN", getTargetLanguage.Invoke(mainWindow, null)?.ToString());
+    }
+
+    private static void TestSharpRenderingSettings()
+    {
+        var mainWindow = new ScreenTranslator.App.MainWindow();
+        var mainSurface = (Border)mainWindow.FindName("MainSurface");
+        var mainScrollViewer = (ScrollViewer)mainWindow.FindName("ContentScrollViewer");
+        Assert(!mainWindow.AllowsTransparency,
+            "The main window must not use layered transparency because it disables ClearType rendering.");
+        Assert(mainSurface.Effect is null,
+            "Effects must not wrap the main content tree because they soften text rendering.");
+        Assert(mainWindow.UseLayoutRounding && mainWindow.SnapsToDevicePixels,
+            "The main window must align layout to physical device pixels.");
+        AssertEqual(
+            System.Windows.Media.TextRenderingMode.ClearType,
+            System.Windows.Media.TextOptions.GetTextRenderingMode(mainWindow));
+        AssertEqual(ScrollBarVisibility.Hidden, mainScrollViewer.VerticalScrollBarVisibility);
+
+        var panel = new TranslationPanelWindow();
+        var panelScrollViewer = (ScrollViewer)panel.FindName("TranslationScrollViewer");
+        AssertEqual(
+            System.Windows.Media.TextRenderingMode.ClearType,
+            System.Windows.Media.TextOptions.GetTextRenderingMode(panel));
+        AssertEqual(ScrollBarVisibility.Hidden, panelScrollViewer.VerticalScrollBarVisibility);
+        panel.AllowClose();
+
+        var overlay = new TranslationOverlayWindow();
+        var overlayScrollViewer = (ScrollViewer)overlay.FindName("TranslationScrollViewer");
+        AssertEqual(ScrollBarVisibility.Hidden, overlayScrollViewer.VerticalScrollBarVisibility);
+        overlay.Close();
+
+        var projectPath = Path.Combine(
+            Environment.CurrentDirectory,
+            "src",
+            "ScreenTranslator.App",
+            "ScreenTranslator.App.csproj");
+        var project = File.ReadAllText(projectPath);
+        Assert(project.Contains(
+                "<ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>",
+                StringComparison.Ordinal),
+            "The application project must opt into per-monitor DPI awareness.");
     }
 
     private static void TestRenderMainWindowPreview()

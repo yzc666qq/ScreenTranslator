@@ -1,19 +1,31 @@
 <Window x:Class="ScreenTranslator.App.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
         Title="Screen Translator"
         Icon="Assets/app-icon.ico"
         Width="660"
         Height="780"
         MinWidth="580"
         MinHeight="660"
-        AllowsTransparency="True"
-        Background="Transparent"
+        Background="{StaticResource WindowBackgroundBrush}"
         FontFamily="Microsoft YaHei UI"
         ResizeMode="CanResizeWithGrip"
+        SnapsToDevicePixels="True"
+        TextOptions.TextFormattingMode="Display"
+        TextOptions.TextHintingMode="Fixed"
+        TextOptions.TextRenderingMode="ClearType"
         Topmost="False"
+        UseLayoutRounding="True"
         WindowStartupLocation="CenterScreen"
         WindowStyle="None">
+    <shell:WindowChrome.WindowChrome>
+        <shell:WindowChrome CaptionHeight="0"
+                            CornerRadius="16"
+                            GlassFrameThickness="0"
+                            ResizeBorderThickness="6"
+                            UseAeroCaptionButtons="False" />
+    </shell:WindowChrome.WindowChrome>
     <Window.Resources>
         <Style x:Key="WindowButtonStyle" TargetType="Button">
             <Setter Property="Width" Value="34" />
@@ -63,18 +75,11 @@
         </DataTemplate>
     </Window.Resources>
 
-    <Border Margin="10"
+    <Border x:Name="MainSurface"
             Background="{StaticResource WindowBackgroundBrush}"
             BorderBrush="{StaticResource BorderBrush}"
             BorderThickness="1"
             CornerRadius="18">
-        <Border.Effect>
-            <DropShadowEffect BlurRadius="28"
-                              Direction="270"
-                              Opacity="0.28"
-                              ShadowDepth="8" />
-        </Border.Effect>
-
         <Grid>
             <Grid.RowDefinitions>
                 <RowDefinition Height="68" />
@@ -97,6 +102,7 @@
                        Width="40"
                        Height="40"
                        Margin="0,0,12,0"
+                       RenderOptions.BitmapScalingMode="HighQuality"
                        Source="Assets/app-icon.png"
                        Stretch="Uniform" />
 
@@ -128,9 +134,11 @@
                     BorderBrush="{StaticResource BorderBrush}"
                     BorderThickness="0,0,0,1" />
 
-            <ScrollViewer Grid.Row="1"
+            <ScrollViewer x:Name="ContentScrollViewer"
+                          Grid.Row="1"
                           HorizontalScrollBarVisibility="Disabled"
-                          VerticalScrollBarVisibility="Auto">
+                          PanningMode="VerticalOnly"
+                          VerticalScrollBarVisibility="Hidden">
                 <StackPanel Margin="22,18,22,22">
                     <Border x:Name="StatusCard" Style="{StaticResource CardStyle}">
                         <Grid>
