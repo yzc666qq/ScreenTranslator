@@ -1,4 +1,5 @@
 using System.Drawing.Imaging;
+using System.IO;
 using System.Net;
 using System.Net.Http;
 using System.Runtime.InteropServices;
@@ -22,6 +23,7 @@ internal static class Program
     private static int Main(string[] args)
     {
         Run("OCR layout preserves indentation and blank lines", TestOcrLayoutFormatting);
+        Run("Application icon assets are valid", TestApplicationIconAssets);
         Run("Unchanged OCR text is not translated twice", TestRecognizedTextChangeTracking);
         Run("Global F1 and F2 hotkeys map to translation commands", TestGlobalHotkeyMapping);
         Run("Main controls do not stay topmost", TestMainWindowLayering);
@@ -39,6 +41,11 @@ internal static class Program
         if (args.Contains("--screen-capture", StringComparer.OrdinalIgnoreCase))
         {
             Run("Screen capture and OCR work end to end", () => TestScreenCaptureAndOcrAsync().GetAwaiter().GetResult());
+        }
+
+        if (args.Contains("--render-ui", StringComparer.OrdinalIgnoreCase))
+        {
+            Run("Main window renders to a visual preview", TestRenderMainWindowPreview);
         }
 
         Console.WriteLine($"RESULT passed={_passed} failed={_failed}");
@@ -72,6 +79,44 @@ internal static class Program
 
         var formatted = OcrLayoutFormatter.Format(lines);
         AssertEqual("TITLE\n  item\n\nA B", formatted.Replace("\r\n", "\n"));
+    }
+
+    private static void TestApplicationIconAssets()
+    {
+        var assetsDirectory = Path.Combine(
+            Environment.CurrentDirectory,
+            "src",
+            "ScreenTranslator.App",
+            "Assets");
+        var pngPath = Path.Combine(assetsDirectory, "app-icon.png");
+        var icoPath = Path.Combine(assetsDirectory, "app-icon.ico");
+
+        Assert(File.Exists(pngPath), "The transparent application icon PNG must exist.");
+        Assert(File.Exists(icoPath), "The Windows multi-size ICO must exist.");
+
+        using var bitmap = new System.Drawing.Bitmap(pngPath);
+        AssertEqual(512, bitmap.Width);
+        AssertEqual(512, bitmap.Height);
+        Assert(bitmap.GetPixel(0, 0).A == 0,
+            "The application icon must retain transparent outer corners.");
+
+        using var smallIcon = new System.Drawing.Icon(icoPath, 16, 16);
+        Assert(smallIcon.Width == 16 && smallIcon.Height == 16,
+            "The ICO must provide a taskbar-size representation.");
+
+        var iconBytes = File.ReadAllBytes(icoPath);
+        var imageCount = BitConverter.ToUInt16(iconBytes, 4);
+        var iconSizes = Enumerable.Range(0, imageCount)
+            .Select(index =>
+            {
+                var entryOffset = 6 + index * 16;
+                var width = iconBytes[entryOffset] == 0 ? 256 : iconBytes[entryOffset];
+                var height = iconBytes[entryOffset + 1] == 0 ? 256 : iconBytes[entryOffset + 1];
+                return (Width: width, Height: height);
+            })
+            .ToArray();
+        Assert(iconSizes.Contains((16, 16)) && iconSizes.Contains((256, 256)),
+            "The ICO directory must contain both taskbar and high-resolution frames.");
     }
 
     private static void TestRecognizedTextChangeTracking()
@@ -111,6 +156,9 @@ internal static class Program
         var panel = new TranslationPanelWindow();
         Assert(panel.Topmost, "Side panel must stay topmost.");
         AssertEqual(WpfResizeMode.CanResizeWithGrip, panel.ResizeMode);
+        var panelSurface = (Border)panel.FindName("PanelSurface");
+        Assert(panelSurface.CornerRadius.TopLeft >= 10,
+            "The redesigned side panel must use a clean rounded surface.");
 
         var controlDock = (Border)panel.FindName("ControlDock");
         Assert(controlDock.Opacity < 0.25,
@@ -167,6 +215,19 @@ internal static class Program
 
         var mainWindow = new ScreenTranslator.App.MainWindow();
         Assert(!mainWindow.Topmost, "The main control window must not cover other applications permanently.");
+        Assert(mainWindow.Icon is not null, "The main window must display the application icon.");
+        var brandIcon = (System.Windows.Controls.Image)mainWindow.FindName("BrandIcon");
+        var statusCard = (Border)mainWindow.FindName("StatusCard");
+        var actionFooter = (Border)mainWindow.FindName("ActionFooter");
+        Assert(brandIcon.Source is not null, "The redesigned header must show the brand icon.");
+        Assert(statusCard.CornerRadius.TopLeft >= 10,
+            "The redesigned status surface must use restrained rounded corners.");
+        AssertEqual(2, Grid.GetRow(actionFooter));
+
+        var accent = (System.Windows.Media.SolidColorBrush)System.Windows.Application.Current!
+            .Resources["AccentBrush"];
+        Assert(accent.Color.G > accent.Color.R && accent.Color.G >= accent.Color.B,
+            "The simplified visual system must use the teal accent palette.");
         var fontFamily = (System.Windows.Controls.ComboBox)mainWindow.FindName("TranslationFontFamilyComboBox");
         var fontSize = (Slider)mainWindow.FindName("TranslationFontSizeSlider");
         var shortcutHelp = (TextBlock)mainWindow.FindName("ShortcutHelpText");
@@ -186,7 +247,7 @@ internal static class Program
             var optionFontFamily = (System.Windows.Media.FontFamily)optionType
                 .GetProperty("FontFamily")!
                 .GetValue(fontOption)!;
-            var preview = (StackPanel)previewTemplate!.LoadContent();
+            var preview = (Grid)previewTemplate!.LoadContent();
             preview.DataContext = fontOption;
             preview.Dispatcher.Invoke(
                 () => { },
@@ -209,6 +270,44 @@ internal static class Program
             "GetTargetLanguage",
             System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
         AssertEqual("zh-CN", getTargetLanguage.Invoke(mainWindow, null)?.ToString());
+    }
+
+    private static void TestRenderMainWindowPreview()
+    {
+        if (System.Windows.Application.Current is null)
+        {
+            var application = new ScreenTranslator.App.App();
+            application.InitializeComponent();
+        }
+
+        var mainWindow = new ScreenTranslator.App.MainWindow();
+        var width = (int)mainWindow.Width;
+        var height = (int)mainWindow.Height;
+        var rootVisual = (System.Windows.FrameworkElement)mainWindow.Content;
+        rootVisual.Measure(new System.Windows.Size(width, height));
+        rootVisual.Arrange(new System.Windows.Rect(0, 0, width, height));
+        rootVisual.UpdateLayout();
+
+        var rendered = new System.Windows.Media.Imaging.RenderTargetBitmap(
+            width,
+            height,
+            96,
+            96,
+            System.Windows.Media.PixelFormats.Pbgra32);
+        rendered.Render(rootVisual);
+
+        var previewPath = Path.Combine(
+            Environment.CurrentDirectory,
+            "artifacts",
+            "ui-preview.png");
+        Directory.CreateDirectory(Path.GetDirectoryName(previewPath)!);
+        var encoder = new System.Windows.Media.Imaging.PngBitmapEncoder();
+        encoder.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(rendered));
+        using var stream = File.Create(previewPath);
+        encoder.Save(stream);
+
+        Assert(new FileInfo(previewPath).Length > 10_000,
+            "The rendered UI preview must contain visible interface content.");
     }
 
     private static void TestRegionSelectorWindow()
@@ -252,6 +351,9 @@ internal static class Program
         var overlay = new TranslationOverlayWindow();
         Assert(overlay.Topmost, "Direct overlay must stay topmost.");
         Assert(!overlay.ShowActivated, "Direct overlay must not steal focus.");
+        var overlaySurface = (Border)overlay.FindName("OverlaySurface");
+        Assert(overlaySurface.CornerRadius.TopLeft >= 8,
+            "The redesigned overlay must use a clean rounded surface.");
 
         const string translated = "1. Alpha\n   2. Beta";
         overlay.SetTranslation(translated);

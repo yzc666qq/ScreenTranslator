@@ -2,6 +2,7 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="实时翻译"
+        Icon="../Assets/app-icon.ico"
         Width="440"
         Height="360"
         MinWidth="280"
@@ -18,27 +19,28 @@
             <Setter Property="Height" Value="26" />
             <Setter Property="Margin" Value="2,0" />
             <Setter Property="Padding" Value="0" />
-            <Setter Property="Background" Value="#28FFFFFF" />
-            <Setter Property="BorderBrush" Value="#30FFFFFF" />
-            <Setter Property="Foreground" Value="White" />
+            <Setter Property="Background" Value="#2427D3BE" />
+            <Setter Property="BorderBrush" Value="#3827D3BE" />
+            <Setter Property="Foreground" Value="#FFF3F7FA" />
             <Setter Property="Cursor" Value="Hand" />
         </Style>
         <Style x:Key="CompactToggleStyle" TargetType="ToggleButton">
             <Setter Property="Height" Value="26" />
             <Setter Property="Margin" Value="2,0" />
             <Setter Property="Padding" Value="6,0" />
-            <Setter Property="Background" Value="#28FFFFFF" />
-            <Setter Property="BorderBrush" Value="#30FFFFFF" />
-            <Setter Property="Foreground" Value="White" />
+            <Setter Property="Background" Value="#2427D3BE" />
+            <Setter Property="BorderBrush" Value="#3827D3BE" />
+            <Setter Property="Foreground" Value="#FFF3F7FA" />
             <Setter Property="Cursor" Value="Hand" />
         </Style>
     </Window.Resources>
 
-    <Border Margin="4"
-            Background="#F21A1D2A"
-            BorderBrush="#447C5CFC"
+    <Border x:Name="PanelSurface"
+            Margin="4"
+            Background="#F20D1218"
+            BorderBrush="#4D32414D"
             BorderThickness="1"
-            CornerRadius="9">
+            CornerRadius="12">
         <Grid>
             <ScrollViewer Margin="12"
                           HorizontalScrollBarVisibility="Disabled"
@@ -46,7 +48,7 @@
                 <TextBlock x:Name="TranslationText"
                            FontFamily="Cascadia Mono, Consolas, Microsoft YaHei UI"
                            FontSize="17"
-                           Foreground="White"
+                           Foreground="#FFF3F7FA"
                            LineHeight="25"
                            TextWrapping="Wrap" />
             </ScrollViewer>
@@ -56,10 +58,10 @@
                     VerticalAlignment="Top"
                     Margin="0,6,6,0"
                     Padding="3"
-                    Background="#D911141E"
-                    BorderBrush="#447C5CFC"
+                    Background="#E611171E"
+                    BorderBrush="#4D32414D"
                     BorderThickness="1"
-                    CornerRadius="6"
+                    CornerRadius="8"
                     MouseEnter="ControlDock_MouseEnter"
                     MouseLeave="ControlDock_MouseLeave"
                     Opacity="0.18">
@@ -67,13 +69,13 @@
                     <Border Width="28"
                             Height="26"
                             Margin="2,0"
-                            Background="#28FFFFFF"
+                            Background="#2427D3BE"
                             Cursor="SizeAll"
                             MouseLeftButtonDown="Header_MouseLeftButtonDown"
                             ToolTip="拖动翻译框">
                         <TextBlock HorizontalAlignment="Center"
                                    VerticalAlignment="Center"
-                                   Foreground="White"
+                                   Foreground="#FFF3F7FA"
                                    Text="⋮⋮" />
                     </Border>
                     <ToggleButton x:Name="LockToggle"
@@ -106,10 +108,10 @@
                 <Border Width="190"
                         Margin="0,5,0,0"
                         Padding="12,9"
-                        Background="#F211141E"
-                        BorderBrush="#667C5CFC"
+                        Background="#F211171E"
+                        BorderBrush="#6632414D"
                         BorderThickness="1"
-                        CornerRadius="7">
+                        CornerRadius="9">
                     <Grid>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
@@ -125,7 +127,7 @@
                                    Grid.Column="1"
                                    HorizontalAlignment="Right"
                                    VerticalAlignment="Center"
-                                   Foreground="#FFB7BDCC" />
+                                   Foreground="#FF8996A5" />
                     </Grid>
                 </Border>
             </Popup>

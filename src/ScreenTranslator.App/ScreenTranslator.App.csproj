@@ -10,6 +10,12 @@
     <UseWindowsForms>true</UseWindowsForms>
     <AssemblyName>ScreenTranslator</AssemblyName>
     <RootNamespace>ScreenTranslator.App</RootNamespace>
+    <ApplicationIcon>Assets\app-icon.ico</ApplicationIcon>
   </PropertyGroup>
+
+  <ItemGroup>
+    <Resource Include="Assets\app-icon.ico" />
+    <Resource Include="Assets\app-icon.png" />
+  </ItemGroup>
 
 </Project>

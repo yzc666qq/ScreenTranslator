@@ -11,7 +11,7 @@
         WindowStyle="None">
     <Border x:Name="IndicatorBorder"
             Background="{x:Null}"
-            BorderBrush="#388D75FF"
+            BorderBrush="#3027D3BE"
             BorderThickness="1"
             IsHitTestVisible="False" />
 </Window>

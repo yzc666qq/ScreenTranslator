@@ -9,17 +9,18 @@
         ShowInTaskbar="False"
         Topmost="True"
         WindowStyle="None">
-    <Border Padding="12"
-            Background="#DD10131D"
-            BorderBrush="#667C5CFC"
+    <Border x:Name="OverlaySurface"
+            Padding="12"
+            Background="#E60D1218"
+            BorderBrush="#5932414D"
             BorderThickness="1"
-            CornerRadius="6">
+            CornerRadius="10">
         <ScrollViewer HorizontalScrollBarVisibility="Disabled"
                       VerticalScrollBarVisibility="Auto">
             <TextBlock x:Name="TranslationText"
                        FontFamily="Cascadia Mono, Consolas, Microsoft YaHei UI"
                        FontSize="18"
-                       Foreground="White"
+                       Foreground="#FFF3F7FA"
                        LineHeight="26"
                        TextWrapping="Wrap" />
         </ScrollViewer>
