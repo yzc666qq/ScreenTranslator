@@ -5,11 +5,7 @@ namespace ScreenTranslator.App.Core;
 
 public sealed class RecognizedTextChangeTracker
 {
-    private const int RequiredStableObservations = 2;
-
     private string? _lastTranslatedFingerprint;
-    private string? _pendingFingerprint;
-    private int _pendingObservations;
 
     public bool ShouldTranslate(string? recognizedText)
     {
@@ -25,39 +21,18 @@ public sealed class RecognizedTextChangeTracker
             return false;
         }
 
-        if (_lastTranslatedFingerprint is null)
-        {
-            return true;
-        }
-
-        if (fingerprint.Equals(_lastTranslatedFingerprint, StringComparison.Ordinal))
-        {
-            ClearPendingChange();
-            return false;
-        }
-
-        if (!fingerprint.Equals(_pendingFingerprint, StringComparison.Ordinal))
-        {
-            _pendingFingerprint = fingerprint;
-            _pendingObservations = 1;
-            return false;
-        }
-
-        _pendingObservations++;
-        return _pendingObservations >= RequiredStableObservations;
+        return !fingerprint.Equals(_lastTranslatedFingerprint, StringComparison.Ordinal);
     }
 
     public void MarkTranslated(string recognizedText)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(recognizedText);
         _lastTranslatedFingerprint = CreateFingerprint(recognizedText);
-        ClearPendingChange();
     }
 
     public void Reset()
     {
         _lastTranslatedFingerprint = null;
-        ClearPendingChange();
     }
 
     private static string CreateFingerprint(string text)
@@ -96,11 +71,5 @@ public sealed class RecognizedTextChangeTracker
         }
 
         return builder.ToString();
-    }
-
-    private void ClearPendingChange()
-    {
-        _pendingFingerprint = null;
-        _pendingObservations = 0;
     }
 }

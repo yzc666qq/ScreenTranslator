@@ -132,20 +132,16 @@ internal static class Program
         Assert(!tracker.ShouldTranslate("  FIRST\r\n"),
             "Whitespace, line-ending and casing noise must not retrigger translation.");
 
-        Assert(!tracker.ShouldTranslate("second"),
-            "A single changed OCR scan must be treated as a possible recognition fluctuation.");
-        Assert(!tracker.ShouldTranslate("first"),
-            "Returning to the translated fingerprint must discard a transient OCR change.");
-        Assert(!tracker.ShouldTranslate("second"),
-            "A genuine change must begin a fresh stability check.");
-        Assert(tracker.ShouldTranslate(" second "),
-            "A changed fingerprint must be translated after two stable observations.");
         Assert(tracker.ShouldTranslate("second"),
-            "A failed translation after stabilization must remain retryable.");
+            "A genuinely changed OCR fingerprint must translate on its first observation.");
+        Assert(tracker.ShouldTranslate("second"),
+            "A failed translation must remain retryable.");
 
         tracker.MarkTranslated("second");
         Assert(!tracker.ShouldTranslate("SECOND"),
             "The new successful translation must become the deduplication baseline.");
+        Assert(tracker.ShouldTranslate("third"),
+            "Rapidly changing live text must not wait for a duplicate scan before translating.");
 
         tracker.MarkTranslated("Ｈｅｌｌｏ　ｗｏｒｌｄ");
         Assert(!tracker.ShouldTranslate("hello world"),
