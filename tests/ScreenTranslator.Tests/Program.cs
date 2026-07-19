@@ -129,7 +129,27 @@ internal static class Program
 
         tracker.MarkTranslated("first");
         Assert(!tracker.ShouldTranslate("first"), "Successfully translated text must be deduplicated.");
-        Assert(tracker.ShouldTranslate("second"), "Changed OCR text must be translated.");
+        Assert(!tracker.ShouldTranslate("  FIRST\r\n"),
+            "Whitespace, line-ending and casing noise must not retrigger translation.");
+
+        Assert(!tracker.ShouldTranslate("second"),
+            "A single changed OCR scan must be treated as a possible recognition fluctuation.");
+        Assert(!tracker.ShouldTranslate("first"),
+            "Returning to the translated fingerprint must discard a transient OCR change.");
+        Assert(!tracker.ShouldTranslate("second"),
+            "A genuine change must begin a fresh stability check.");
+        Assert(tracker.ShouldTranslate(" second "),
+            "A changed fingerprint must be translated after two stable observations.");
+        Assert(tracker.ShouldTranslate("second"),
+            "A failed translation after stabilization must remain retryable.");
+
+        tracker.MarkTranslated("second");
+        Assert(!tracker.ShouldTranslate("SECOND"),
+            "The new successful translation must become the deduplication baseline.");
+
+        tracker.MarkTranslated("Ｈｅｌｌｏ　ｗｏｒｌｄ");
+        Assert(!tracker.ShouldTranslate("hello world"),
+            "Unicode width variants from OCR must share the same fingerprint.");
 
         tracker.Reset();
         Assert(tracker.ShouldTranslate("first"), "Starting a new run must reset deduplication state.");
@@ -441,8 +461,8 @@ internal static class Program
         using var document = JsonDocument.Parse(handler.RequestBody!);
         var root = document.RootElement;
         AssertEqual("disabled", root.GetProperty("thinking").GetProperty("type").GetString());
-        Assert(Math.Abs(root.GetProperty("temperature").GetDouble() - 0.1) < 0.001,
-            "Translation requests must use a low temperature for stable output.");
+        Assert(Math.Abs(root.GetProperty("temperature").GetDouble()) < 0.001,
+            "Translation requests must use zero temperature for deterministic output.");
         AssertEqual(source, root.GetProperty("messages")[1].GetProperty("content").GetString());
         var prompt = root.GetProperty("messages")[0].GetProperty("content").GetString()!;
         Assert(prompt.Contains("Detect the source language", StringComparison.Ordinal),

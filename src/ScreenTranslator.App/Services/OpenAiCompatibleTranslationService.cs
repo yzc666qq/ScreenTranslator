@@ -87,7 +87,7 @@ public sealed class OpenAiCompatibleTranslationService(HttpClient httpClient) : 
                 model = options.Model,
                 messages,
                 stream = false,
-                temperature = 0.1,
+                temperature = 0.0,
                 thinking = new { type = "disabled" }
             }
             : new
@@ -95,7 +95,7 @@ public sealed class OpenAiCompatibleTranslationService(HttpClient httpClient) : 
                 model = options.Model,
                 messages,
                 stream = false,
-                temperature = 0.1
+                temperature = 0.0
             };
 
         using var request = new HttpRequestMessage(HttpMethod.Post, options.Endpoint);
