@@ -14,6 +14,9 @@ namespace ScreenTranslator.App;
 
 public partial class MainWindow : Window
 {
+    private const string CloudEndpoint = "https://api.deepseek.com/chat/completions";
+    private const string OfflineEndpoint = "http://127.0.0.1:5000";
+
     private static readonly (string FontFamilyName, string DisplayName)[] PreferredTranslationFonts =
     [
         ("Microsoft YaHei UI", "微软雅黑"),
@@ -32,7 +35,8 @@ public partial class MainWindow : Window
     private readonly TranslationPanelWindow _panelWindow = new();
     private readonly RegionIndicatorWindow _regionIndicatorWindow = new();
     private readonly GlobalHotkeyManager _globalHotkeyManager = new();
-    private readonly OpenAiCompatibleTranslationService _translationService;
+    private readonly OpenAiCompatibleTranslationService _cloudTranslationService;
+    private readonly LibreTranslateTranslationService _offlineTranslationService;
     private readonly RecognizedTextChangeTracker _textChangeTracker = new();
 
     private ITextRecognizer? _textRecognizer;
@@ -41,12 +45,18 @@ public partial class MainWindow : Window
     private Task? _runTask;
     private string? _lastTranslation;
     private bool _isSelectingRegion;
+    private bool _providerUiReady;
+    private TranslationEngineKind _selectedEngine = TranslationEngineKind.OpenAiCompatible;
+    private string _cloudEndpoint = CloudEndpoint;
+    private string _offlineEndpoint = OfflineEndpoint;
 
     public MainWindow()
     {
         InitializeComponent();
-        _translationService = new OpenAiCompatibleTranslationService(_httpClient);
+        _cloudTranslationService = new OpenAiCompatibleTranslationService(_httpClient);
+        _offlineTranslationService = new LibreTranslateTranslationService(_httpClient);
         InitializeTranslationTypography();
+        UpdateTranslationEngineUi();
 
         SourceInitialized += MainWindow_SourceInitialized;
         Closed += MainWindow_Closed;
@@ -68,6 +78,49 @@ public partial class MainWindow : Window
             DragMove();
         }
     }
+
+    private void TranslationEngineComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        UpdateTranslationEngineUi();
+    }
+
+    private void UpdateTranslationEngineUi()
+    {
+        if (TranslationEngineComboBox is null ||
+            EndpointTextBox is null ||
+            CloudOptionsPanel is null ||
+            ProviderHintText is null)
+        {
+            return;
+        }
+
+        if (_providerUiReady)
+        {
+            if (_selectedEngine == TranslationEngineKind.LocalLibreTranslate)
+            {
+                _offlineEndpoint = EndpointTextBox.Text.Trim();
+            }
+            else
+            {
+                _cloudEndpoint = EndpointTextBox.Text.Trim();
+            }
+        }
+
+        _selectedEngine = GetSelectedTranslationEngine();
+        var isOffline = _selectedEngine == TranslationEngineKind.LocalLibreTranslate;
+        EndpointTextBox.Text = isOffline ? _offlineEndpoint : _cloudEndpoint;
+        CloudOptionsPanel.Visibility = isOffline ? Visibility.Collapsed : Visibility.Visible;
+        ProviderHintText.Text = isOffline
+            ? "无需 API 密钥；请先在本机启动 LibreTranslate，源语言自动检测。"
+            : "也可使用 DEEPSEEK_API_KEY；仅在识别文本变化时请求模型。";
+        _providerUiReady = true;
+    }
+
+    private TranslationEngineKind GetSelectedTranslationEngine() =>
+        TranslationEngineComboBox.SelectedItem is ComboBoxItem { Tag: string tag } &&
+        tag.Equals("libretranslate", StringComparison.OrdinalIgnoreCase)
+            ? TranslationEngineKind.LocalLibreTranslate
+            : TranslationEngineKind.OpenAiCompatible;
 
     private async void SelectRegionButton_Click(object sender, RoutedEventArgs e)
     {
@@ -132,7 +185,7 @@ public partial class MainWindow : Window
             }
             else
             {
-                SetStatus("区域已选择", "配置模型后即可开始实时翻译", isError: false);
+                SetStatus("区域已选择", "配置翻译引擎后即可开始实时翻译", isError: false);
             }
         }
         finally
@@ -167,23 +220,37 @@ public partial class MainWindow : Window
             return;
         }
 
+        var selectedEngine = GetSelectedTranslationEngine();
         var model = ModelTextBox.Text.Trim();
         var apiKey = ApiKeyPasswordBox.Password.Trim();
 
-        if (string.IsNullOrWhiteSpace(model) || string.IsNullOrWhiteSpace(apiKey))
+        if (selectedEngine == TranslationEngineKind.OpenAiCompatible &&
+            (string.IsNullOrWhiteSpace(model) || string.IsNullOrWhiteSpace(apiKey)))
         {
             SetStatus("模型或 API 密钥为空", "可输入密钥或设置 DEEPSEEK_API_KEY", isError: true);
             return;
         }
 
+        ITranslationService translationService;
+
         try
         {
             _textRecognizer ??= new WindowsOcrTextRecognizer();
-            _translationService.Configure(new TranslationProviderOptions(endpoint, model, apiKey));
+
+            if (selectedEngine == TranslationEngineKind.LocalLibreTranslate)
+            {
+                _offlineTranslationService.Configure(endpoint);
+                translationService = _offlineTranslationService;
+            }
+            else
+            {
+                _cloudTranslationService.Configure(new TranslationProviderOptions(endpoint, model, apiKey));
+                translationService = _cloudTranslationService;
+            }
         }
         catch (Exception exception)
         {
-            SetStatus("OCR 初始化失败", exception.Message, isError: true);
+            SetStatus("翻译引擎初始化失败", exception.Message, isError: true);
             return;
         }
 
@@ -192,15 +259,27 @@ public partial class MainWindow : Window
         _runCancellation = new CancellationTokenSource();
         StartStopButton.Content = "停止实时翻译";
         SelectRegionButton.IsEnabled = false;
+        TranslationEngineComboBox.IsEnabled = false;
         SetStatus("正在识别所选区域", "只在文字变化时调用翻译接口", isError: false);
         ShowActiveOutput("正在识别…", region);
 
-        _runTask = RunTranslationLoopAsync(region, _runCancellation.Token);
+        _runTask = RunTranslationLoopAsync(
+            region,
+            translationService,
+            selectedEngine,
+            _runCancellation.Token);
     }
 
-    private async Task RunTranslationLoopAsync(ScreenRegion region, CancellationToken cancellationToken)
+    private async Task RunTranslationLoopAsync(
+        ScreenRegion region,
+        ITranslationService translationService,
+        TranslationEngineKind translationEngine,
+        CancellationToken cancellationToken)
     {
         var interval = GetSelectedInterval();
+        var languageDetection = translationEngine == TranslationEngineKind.LocalLibreTranslate
+            ? "源语言：由本地离线引擎自动检测"
+            : "源语言：由模型根据正文自动检测";
 
         while (!cancellationToken.IsCancellationRequested)
         {
@@ -215,9 +294,8 @@ public partial class MainWindow : Window
                 }
                 else if (_textChangeTracker.ShouldTranslate(recognized.Text))
                 {
-                    const string languageDetection = "源语言：由模型根据正文自动检测";
                     SetStatus("发现文字变化，正在翻译", languageDetection, isError: false);
-                    var translated = await _translationService.TranslateAsync(
+                    var translated = await translationService.TranslateAsync(
                         recognized.Text,
                         "auto",
                         GetTargetLanguage(),
@@ -273,6 +351,7 @@ public partial class MainWindow : Window
         cancellation?.Dispose();
         StartStopButton.Content = "开始实时翻译";
         SelectRegionButton.IsEnabled = true;
+        TranslationEngineComboBox.IsEnabled = true;
 
         if (IsLoaded)
         {
@@ -433,6 +512,12 @@ public partial class MainWindow : Window
     }
 
     private sealed record FontPreviewOption(string DisplayName, WpfFontFamily FontFamily);
+
+    private enum TranslationEngineKind
+    {
+        OpenAiCompatible,
+        LocalLibreTranslate
+    }
 
     private void UpdateOverlayOpacityLabel()
     {

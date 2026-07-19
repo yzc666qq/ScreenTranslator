@@ -305,16 +305,28 @@
                     </Border>
 
                     <TextBlock Margin="2,18,0,9"
+                               x:Name="ProviderSectionLabel"
                                Style="{StaticResource SectionLabelStyle}"
-                               Text="模型服务" />
+                               Text="翻译引擎" />
                     <Border Style="{StaticResource CardStyle}">
                         <StackPanel>
-                            <TextBlock Style="{StaticResource FieldLabelStyle}" Text="接口地址" />
+                            <TextBlock Style="{StaticResource FieldLabelStyle}" Text="翻译方式" />
+                            <ComboBox x:Name="TranslationEngineComboBox"
+                                      SelectedIndex="0"
+                                      SelectionChanged="TranslationEngineComboBox_SelectionChanged"
+                                      Style="{StaticResource InputComboBoxStyle}">
+                                <ComboBoxItem Content="DeepSeek / OpenAI 兼容" Tag="openai" />
+                                <ComboBoxItem Content="本地离线 · LibreTranslate" Tag="libretranslate" />
+                            </ComboBox>
+
+                            <TextBlock Margin="0,15,0,7"
+                                       Style="{StaticResource FieldLabelStyle}"
+                                       Text="服务地址" />
                             <TextBox x:Name="EndpointTextBox"
                                      Style="{StaticResource InputTextBoxStyle}"
                                      Text="https://api.deepseek.com/chat/completions" />
 
-                            <Grid Margin="0,15,0,0">
+                            <Grid x:Name="CloudOptionsPanel" Margin="0,15,0,0">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />
                                     <ColumnDefinition Width="18" />
@@ -333,7 +345,8 @@
                                 </StackPanel>
                             </Grid>
 
-                            <TextBlock Margin="1,9,0,0"
+                            <TextBlock x:Name="ProviderHintText"
+                                       Margin="1,9,0,0"
                                        FontSize="11"
                                        Foreground="{StaticResource MutedTextBrush}"
                                        Text="也可使用 DEEPSEEK_API_KEY；仅在识别文本变化时请求模型。" />

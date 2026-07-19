@@ -32,6 +32,7 @@ internal static class Program
         Run("Selected region indicator is transparent and subtle", TestRegionIndicatorWindow);
         Run("Side panel supports locking, resizing and opacity", TestSidePanelControls);
         Run("Overlay preserves translated text and region", TestOverlayWindow);
+        Run("LibreTranslate adapter preserves layout and batches local requests", () => TestLibreTranslateAdapterAsync().GetAwaiter().GetResult());
         Run("DeepSeek adapter preserves formatting", () => TestDeepSeekAdapterAsync().GetAwaiter().GetResult());
         Run("Untranslated output retries once", () => TestUntranslatedOutputRetryAsync().GetAwaiter().GetResult());
         Run("A worse retry cannot replace the original response", () => TestWorseRetryIsRejectedAsync().GetAwaiter().GetResult());
@@ -252,6 +253,10 @@ internal static class Program
         var fontFamily = (System.Windows.Controls.ComboBox)mainWindow.FindName("TranslationFontFamilyComboBox");
         var fontSize = (Slider)mainWindow.FindName("TranslationFontSizeSlider");
         var shortcutHelp = (TextBlock)mainWindow.FindName("ShortcutHelpText");
+        var translationEngine = (System.Windows.Controls.ComboBox)mainWindow.FindName("TranslationEngineComboBox");
+        var endpoint = (System.Windows.Controls.TextBox)mainWindow.FindName("EndpointTextBox");
+        var cloudOptions = (Grid)mainWindow.FindName("CloudOptionsPanel");
+        var providerHint = (TextBlock)mainWindow.FindName("ProviderHintText");
         Assert(shortcutHelp.Text.Contains("F1", StringComparison.Ordinal) &&
                shortcutHelp.Text.Contains("F2", StringComparison.Ordinal),
             "The main window must explain both global hotkeys.");
@@ -260,6 +265,14 @@ internal static class Program
             "The font picker must expose no more than eight common installed fonts.");
         var previewTemplate = fontFamily.ItemTemplate;
         Assert(previewTemplate is not null, "Font choices must use a visual preview template.");
+
+        translationEngine.SelectedIndex = 1;
+        AssertEqual("http://127.0.0.1:5000", endpoint.Text);
+        AssertEqual(System.Windows.Visibility.Collapsed, cloudOptions.Visibility);
+        Assert(providerHint.Text.Contains("无需 API 密钥", StringComparison.Ordinal),
+            "The local offline provider must explain that no API key is required.");
+        translationEngine.SelectedIndex = 0;
+        AssertEqual(System.Windows.Visibility.Visible, cloudOptions.Visibility);
 
         foreach (var fontOption in fontFamily.Items)
         {
@@ -428,6 +441,46 @@ internal static class Program
         Assert(Math.Abs(textBlock.FontSize - 20) < 0.001, "Overlay font size was not applied.");
         Assert(overlay.Width > 0 && overlay.Height > 0, "Overlay region must have a positive size.");
         overlay.Close();
+    }
+
+    private static async Task TestLibreTranslateAdapterAsync()
+    {
+        const string source = "  Hello\r\n\r\nWorld  \nHello";
+        const string translated = "  你好\r\n\r\n世界  \n你好";
+        var handler = new RecordingHandler(_ => JsonResponse(new
+        {
+            translatedText = new[] { "你好", "世界" },
+            detectedLanguage = new[]
+            {
+                new { confidence = 100, language = "en" },
+                new { confidence = 100, language = "en" }
+            }
+        }));
+        using var client = new HttpClient(handler);
+        var service = new LibreTranslateTranslationService(client);
+        service.Configure(new Uri("http://127.0.0.1:5000"));
+
+        var result = await service.TranslateAsync(source, "auto", "zh-CN");
+        AssertEqual(source, result.SourceText);
+        AssertEqual(translated, result.TranslatedText);
+        AssertEqual(1, handler.RequestCount);
+        AssertEqual("http://127.0.0.1:5000/translate", handler.RequestUri?.ToString());
+        Assert(handler.Authorization is null, "A self-hosted local provider must not send an API key.");
+
+        using var document = JsonDocument.Parse(handler.RequestBody!);
+        var root = document.RootElement;
+        AssertEqual("auto", root.GetProperty("source").GetString());
+        AssertEqual("zh", root.GetProperty("target").GetString());
+        AssertEqual("text", root.GetProperty("format").GetString());
+        var batch = root.GetProperty("q");
+        AssertEqual(JsonValueKind.Array, batch.ValueKind);
+        AssertEqual(2, batch.GetArrayLength());
+        AssertEqual("Hello", batch[0].GetString());
+        AssertEqual("World", batch[1].GetString());
+
+        var cachedResult = await service.TranslateAsync(source, "auto", "zh-CN");
+        AssertEqual(translated, cachedResult.TranslatedText);
+        AssertEqual(1, handler.RequestCount);
     }
 
     private static async Task TestDeepSeekAdapterAsync()
@@ -718,6 +771,8 @@ internal static class Program
 
         public int RequestCount { get; private set; }
 
+        public Uri? RequestUri { get; private set; }
+
         protected override async Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,
             CancellationToken cancellationToken)
@@ -726,6 +781,7 @@ internal static class Program
                 ? null
                 : await request.Content.ReadAsStringAsync(cancellationToken);
             Authorization = request.Headers.Authorization?.ToString();
+            RequestUri = request.RequestUri;
             RequestCount++;
             return responseFactory(request);
         }
