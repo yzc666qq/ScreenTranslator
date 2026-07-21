@@ -25,6 +25,7 @@ internal static class Program
         Run("OCR layout preserves indentation and blank lines", TestOcrLayoutFormatting);
         Run("Application icon assets are valid", TestApplicationIconAssets);
         Run("Unchanged OCR text is not translated twice", TestRecognizedTextChangeTracking);
+        Run("New OCR state cancels stale translation work", TestLatestTranslationCoordination);
         Run("Global F1 and F2 hotkeys map to translation commands", TestGlobalHotkeyMapping);
         Run("Main controls do not stay topmost", TestMainWindowLayering);
         Run("Windows use sharp DPI-aware rendering without visible scrollbars", TestSharpRenderingSettings);
@@ -34,6 +35,7 @@ internal static class Program
         Run("Overlay preserves translated text and region", TestOverlayWindow);
         Run("LibreTranslate adapter preserves layout and batches local requests", () => TestLibreTranslateAdapterAsync().GetAwaiter().GetResult());
         Run("DeepSeek adapter preserves formatting", () => TestDeepSeekAdapterAsync().GetAwaiter().GetResult());
+        Run("Cloud session cache reuses earlier translations", () => TestCloudSessionCacheAsync().GetAwaiter().GetResult());
         Run("Untranslated output retries once", () => TestUntranslatedOutputRetryAsync().GetAwaiter().GetResult());
         Run("A worse retry cannot replace the original response", () => TestWorseRetryIsRejectedAsync().GetAwaiter().GetResult());
         Run("Mixed target-language output is not retried", () => TestMixedTranslationIsAcceptedAsync().GetAwaiter().GetResult());
@@ -150,6 +152,34 @@ internal static class Program
 
         tracker.Reset();
         Assert(tracker.ShouldTranslate("first"), "Starting a new run must reset deduplication state.");
+    }
+
+    private static void TestLatestTranslationCoordination()
+    {
+        using var coordinator = new LatestTranslationCoordinator();
+
+        Assert(coordinator.TryObserve("first", "zh-CN", out var chineseKey),
+            "The first recognized translation state must be queued.");
+        Assert(!coordinator.TryObserve("  FIRST\r\n", "zh-CN", out _),
+            "Equivalent OCR noise must not queue duplicate work.");
+
+        var chineseOperation = coordinator.TryBegin(chineseKey, CancellationToken.None)
+            ?? throw new InvalidOperationException("The latest queued work must be allowed to start.");
+        Assert(coordinator.TryObserve("first", "en", out var englishKey),
+            "Changing only the target language must queue a new translation.");
+        Assert(chineseOperation.IsCancellationRequested,
+            "Changing translation state must cancel the stale in-flight request.");
+        Assert(!coordinator.IsLatest(chineseKey) && coordinator.IsLatest(englishKey),
+            "Only the newest translation state may update the output.");
+        coordinator.End(chineseOperation);
+
+        var englishOperation = coordinator.TryBegin(englishKey, CancellationToken.None)
+            ?? throw new InvalidOperationException("The replacement request must be allowed to start.");
+        coordinator.End(englishOperation);
+
+        coordinator.AllowRetry(englishKey);
+        Assert(coordinator.TryObserve("first", "en", out _),
+            "A failed latest request must remain retryable on the next scan.");
     }
 
     private static void TestGlobalHotkeyMapping()
@@ -522,6 +552,33 @@ internal static class Program
         Assert(prompt.Contains("indentation", StringComparison.Ordinal), "Formatting prompt must preserve indentation.");
         Assert(prompt.Contains("prioritize accurate, natural translation", StringComparison.Ordinal),
             "Formatting constraints must not override translation accuracy.");
+    }
+
+    private static async Task TestCloudSessionCacheAsync()
+    {
+        var responses = new Queue<string>(["你好", "世界", "您好"]);
+        var handler = new RecordingHandler(_ => JsonResponse(new
+        {
+            choices = new[] { new { message = new { content = responses.Dequeue() } } }
+        }));
+        using var client = new HttpClient(handler);
+        var service = new OpenAiCompatibleTranslationService(client);
+        var endpoint = new Uri("https://api.deepseek.com/chat/completions");
+        service.Configure(new TranslationProviderOptions(endpoint, "model-a", "unit-test-key"));
+
+        var first = await service.TranslateAsync("Hello", "auto", "zh-CN");
+        var second = await service.TranslateAsync("World", "auto", "zh-CN");
+        var repeated = await service.TranslateAsync("  HELLO\r\n", "auto", "zh-CN");
+
+        AssertEqual("你好", first.TranslatedText);
+        AssertEqual("世界", second.TranslatedText);
+        AssertEqual(first.TranslatedText, repeated.TranslatedText);
+        AssertEqual(2, handler.RequestCount);
+
+        service.Configure(new TranslationProviderOptions(endpoint, "model-b", "unit-test-key"));
+        var reconfigured = await service.TranslateAsync("Hello", "auto", "zh-CN");
+        AssertEqual("您好", reconfigured.TranslatedText);
+        AssertEqual(3, handler.RequestCount);
     }
 
     private static async Task TestGenericAdapterAsync()

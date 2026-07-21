@@ -1,4 +1,5 @@
 using System.Net.Http;
+using System.Threading.Channels;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -37,7 +38,6 @@ public partial class MainWindow : Window
     private readonly GlobalHotkeyManager _globalHotkeyManager = new();
     private readonly OpenAiCompatibleTranslationService _cloudTranslationService;
     private readonly LibreTranslateTranslationService _offlineTranslationService;
-    private readonly RecognizedTextChangeTracker _textChangeTracker = new();
 
     private ITextRecognizer? _textRecognizer;
     private ScreenRegion? _selectedRegion;
@@ -254,7 +254,6 @@ public partial class MainWindow : Window
             return;
         }
 
-        _textChangeTracker.Reset();
         _lastTranslation = null;
         _runCancellation = new CancellationTokenSource();
         StartStopButton.Content = "停止实时翻译";
@@ -281,45 +280,146 @@ public partial class MainWindow : Window
             ? "源语言：由本地离线引擎自动检测"
             : "源语言：由模型根据正文自动检测";
 
-        while (!cancellationToken.IsCancellationRequested)
+        var workQueue = Channel.CreateBounded<TranslationWork>(new BoundedChannelOptions(1)
         {
+            SingleReader = true,
+            SingleWriter = true,
+            FullMode = BoundedChannelFullMode.DropOldest
+        });
+
+        using var coordinator = new LatestTranslationCoordinator();
+        var recognitionTask = RunRecognitionLoopAsync(
+            region,
+            interval,
+            languageDetection,
+            coordinator,
+            workQueue.Writer,
+            cancellationToken);
+        var translationTask = RunTranslationWorkerAsync(
+            region,
+            translationService,
+            interval,
+            languageDetection,
+            coordinator,
+            workQueue.Reader,
+            cancellationToken);
+
+        await Task.WhenAll(recognitionTask, translationTask);
+    }
+
+    private async Task RunRecognitionLoopAsync(
+        ScreenRegion region,
+        TimeSpan interval,
+        string languageDetection,
+        LatestTranslationCoordinator coordinator,
+        ChannelWriter<TranslationWork> writer,
+        CancellationToken cancellationToken)
+    {
+        using var timer = new PeriodicTimer(interval);
+
+        try
+        {
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                try
+                {
+                    var frame = await _screenCaptureService.CaptureAsync(region, cancellationToken);
+                    var recognized = await _textRecognizer!.RecognizeAsync(frame, cancellationToken);
+
+                    if (string.IsNullOrWhiteSpace(recognized.Text))
+                    {
+                        if (_lastTranslation is null)
+                        {
+                            SetStatus("未识别到文字", "继续监视所选区域", isError: false);
+                        }
+                    }
+                    else
+                    {
+                        var targetLanguage = GetTargetLanguage();
+
+                        if (coordinator.TryObserve(recognized.Text, targetLanguage, out var key))
+                        {
+                            writer.TryWrite(new TranslationWork(
+                                key,
+                                recognized.Text,
+                                targetLanguage));
+                            SetStatus("发现文字变化，正在翻译", languageDetection, isError: false);
+                        }
+                    }
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    break;
+                }
+                catch (Exception exception)
+                {
+                    SetStatus("本轮识别失败，将自动重试", exception.Message, isError: true);
+                }
+
+                if (!await timer.WaitForNextTickAsync(cancellationToken))
+                {
+                    break;
+                }
+            }
+        }
+        finally
+        {
+            writer.TryComplete();
+        }
+    }
+
+    private async Task RunTranslationWorkerAsync(
+        ScreenRegion region,
+        ITranslationService translationService,
+        TimeSpan interval,
+        string languageDetection,
+        LatestTranslationCoordinator coordinator,
+        ChannelReader<TranslationWork> reader,
+        CancellationToken cancellationToken)
+    {
+        await foreach (var work in reader.ReadAllAsync(cancellationToken))
+        {
+            var operation = coordinator.TryBegin(work.Key, cancellationToken);
+            if (operation is null)
+            {
+                continue;
+            }
+
             try
             {
-                var frame = await _screenCaptureService.CaptureAsync(region, cancellationToken);
-                var recognized = await _textRecognizer!.RecognizeAsync(frame, cancellationToken);
+                var translated = await translationService.TranslateAsync(
+                    work.SourceText,
+                    "auto",
+                    work.TargetLanguage,
+                    operation.Token);
 
-                if (string.IsNullOrWhiteSpace(recognized.Text))
+                if (!coordinator.IsLatest(work.Key))
                 {
-                    SetStatus("未识别到文字", "继续监视所选区域", isError: false);
-                }
-                else if (_textChangeTracker.ShouldTranslate(recognized.Text))
-                {
-                    SetStatus("发现文字变化，正在翻译", languageDetection, isError: false);
-                    var translated = await translationService.TranslateAsync(
-                        recognized.Text,
-                        "auto",
-                        GetTargetLanguage(),
-                        cancellationToken);
-
-                    _textChangeTracker.MarkTranslated(recognized.Text);
-                    _lastTranslation = translated.TranslatedText;
-                    ShowActiveOutput(translated.TranslatedText, region);
-                    SetStatus(
-                        "实时翻译运行中",
-                        $"{languageDetection} · 更新：{DateTime.Now:HH:mm:ss}",
-                        isError: false);
+                    continue;
                 }
 
-                await Task.Delay(interval, cancellationToken);
+                _lastTranslation = translated.TranslatedText;
+                ShowActiveOutput(translated.TranslatedText, region);
+                SetStatus(
+                    "实时翻译运行中",
+                    $"{languageDetection} · 更新：{DateTime.Now:HH:mm:ss}",
+                    isError: false);
             }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            catch (OperationCanceledException) when (operation.IsCancellationRequested)
             {
-                break;
+                // A newer OCR result superseded this request, or the run was stopped.
             }
             catch (Exception exception)
             {
+                coordinator.AllowRetry(work.Key);
                 SetStatus("本轮翻译失败，将自动重试", exception.Message, isError: true);
-                await Task.Delay(TimeSpan.FromMilliseconds(Math.Max(3000, interval.TotalMilliseconds)), cancellationToken);
+                await Task.Delay(
+                    TimeSpan.FromMilliseconds(Math.Max(3000, interval.TotalMilliseconds)),
+                    cancellationToken);
+            }
+            finally
+            {
+                coordinator.End(operation);
             }
         }
     }
@@ -510,6 +610,11 @@ public partial class MainWindow : Window
         _panelWindow.SetTypography(fontFamily, fontSize);
         TranslationFontSizeText.Text = $"{fontSize:0}";
     }
+
+    private sealed record TranslationWork(
+        TranslationRequestKey Key,
+        string SourceText,
+        string TargetLanguage);
 
     private sealed record FontPreviewOption(string DisplayName, WpfFontFamily FontFamily);
 

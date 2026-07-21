@@ -1,5 +1,5 @@
-using System.Net.Http.Headers;
 using System.Net.Http;
+using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using ScreenTranslator.App.Core;
@@ -8,6 +8,10 @@ namespace ScreenTranslator.App.Services;
 
 public sealed class OpenAiCompatibleTranslationService(HttpClient httpClient) : ITranslationService
 {
+    private const int MaximumCachedTranslations = 256;
+
+    private readonly BoundedLruCache<TranslationCacheKey, string> _translationCache =
+        new(MaximumCachedTranslations);
     private TranslationProviderOptions? _options;
 
     public void Configure(TranslationProviderOptions options)
@@ -39,6 +43,18 @@ public sealed class OpenAiCompatibleTranslationService(HttpClient httpClient) : 
         var options = _options
             ?? throw new InvalidOperationException("尚未配置翻译服务。 ");
 
+        var cacheKey = new TranslationCacheKey(
+            options.Endpoint.AbsoluteUri,
+            options.Model,
+            sourceLanguage.Trim().ToUpperInvariant(),
+            targetLanguage.Trim().ToUpperInvariant(),
+            RecognizedTextChangeTracker.CreateFingerprint(text));
+
+        if (_translationCache.TryGetValue(cacheKey, out var cachedTranslation))
+        {
+            return new TranslationResult(text, cachedTranslation, sourceLanguage, targetLanguage);
+        }
+
         _ = sourceLanguageHint;
         var sourceInstruction = sourceLanguage.Equals("auto", StringComparison.OrdinalIgnoreCase)
             ? "Detect the source language or languages from the text itself."
@@ -52,6 +68,7 @@ public sealed class OpenAiCompatibleTranslationService(HttpClient httpClient) : 
 
         if (!TranslationQualityGuard.ShouldRetry(text, firstTranslation, targetLanguage))
         {
+            _translationCache.Set(cacheKey, firstTranslation);
             return new TranslationResult(text, firstTranslation, sourceLanguage, targetLanguage);
         }
 
@@ -65,6 +82,8 @@ public sealed class OpenAiCompatibleTranslationService(HttpClient httpClient) : 
             firstTranslation,
             retryTranslation,
             targetLanguage);
+
+        _translationCache.Set(cacheKey, preferredTranslation);
 
         return new TranslationResult(text, preferredTranslation, sourceLanguage, targetLanguage);
     }
@@ -145,4 +164,11 @@ public sealed class OpenAiCompatibleTranslationService(HttpClient httpClient) : 
                "but prioritize accurate, natural translation over matching the exact number of lines. " +
                "If text is already in the target language, keep it unchanged. Return only the translation, without explanations or Markdown fences.";
     }
+
+    private sealed record TranslationCacheKey(
+        string Endpoint,
+        string Model,
+        string SourceLanguage,
+        string TargetLanguage,
+        string SourceFingerprint);
 }

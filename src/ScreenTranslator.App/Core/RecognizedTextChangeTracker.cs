@@ -35,8 +35,13 @@ public sealed class RecognizedTextChangeTracker
         _lastTranslatedFingerprint = null;
     }
 
-    private static string CreateFingerprint(string text)
+    internal static string CreateFingerprint(string? text)
     {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return string.Empty;
+        }
+
         var normalized = text.Normalize(NormalizationForm.FormKC);
         var builder = new StringBuilder(normalized.Length);
         var pendingSpace = false;
