@@ -303,13 +303,15 @@ internal static class Program
         var previewTemplate = fontFamily.ItemTemplate;
         Assert(previewTemplate is not null, "Font choices must use a visual preview template.");
 
-        translationEngine.SelectedIndex = 1;
+        AssertEqual(1, translationEngine.SelectedIndex);
         AssertEqual("http://127.0.0.1:5000", endpoint.Text);
         AssertEqual(System.Windows.Visibility.Collapsed, cloudOptions.Visibility);
         Assert(providerHint.Text.Contains("无需 API 密钥", StringComparison.Ordinal),
-            "The local offline provider must explain that no API key is required.");
+            "The default local offline provider must explain that no API key is required.");
         translationEngine.SelectedIndex = 0;
         AssertEqual(System.Windows.Visibility.Visible, cloudOptions.Visibility);
+        translationEngine.SelectedIndex = 1;
+        AssertEqual(System.Windows.Visibility.Collapsed, cloudOptions.Visibility);
 
         foreach (var fontOption in fontFamily.Items)
         {

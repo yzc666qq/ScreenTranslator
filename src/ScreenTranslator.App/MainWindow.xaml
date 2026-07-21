@@ -312,7 +312,7 @@
                         <StackPanel>
                             <TextBlock Style="{StaticResource FieldLabelStyle}" Text="翻译方式" />
                             <ComboBox x:Name="TranslationEngineComboBox"
-                                      SelectedIndex="0"
+                                      SelectedIndex="1"
                                       SelectionChanged="TranslationEngineComboBox_SelectionChanged"
                                       Style="{StaticResource InputComboBoxStyle}">
                                 <ComboBoxItem Content="DeepSeek / OpenAI 兼容" Tag="openai" />

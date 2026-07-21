@@ -46,7 +46,7 @@ public partial class MainWindow : Window
     private string? _lastTranslation;
     private bool _isSelectingRegion;
     private bool _providerUiReady;
-    private TranslationEngineKind _selectedEngine = TranslationEngineKind.OpenAiCompatible;
+    private TranslationEngineKind _selectedEngine = TranslationEngineKind.LocalLibreTranslate;
     private string _cloudEndpoint = CloudEndpoint;
     private string _offlineEndpoint = OfflineEndpoint;
 
@@ -65,7 +65,11 @@ public partial class MainWindow : Window
         if (!string.IsNullOrWhiteSpace(environmentKey))
         {
             ApiKeyPasswordBox.Password = environmentKey;
-            StatusDetailText.Text = "已从 DEEPSEEK_API_KEY 读取密钥";
+
+            if (_selectedEngine == TranslationEngineKind.OpenAiCompatible)
+            {
+                StatusDetailText.Text = "已从 DEEPSEEK_API_KEY 读取密钥";
+            }
         }
 
         UpdateOverlayOpacityLabel();
