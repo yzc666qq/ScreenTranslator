@@ -393,7 +393,9 @@ public partial class MainWindow : Window
                     work.TargetLanguage,
                     operation.Token);
 
-                if (!coordinator.IsLatest(work.Key))
+                cancellationToken.ThrowIfCancellationRequested();
+
+                if (!coordinator.CanPublish(work.Key))
                 {
                     continue;
                 }

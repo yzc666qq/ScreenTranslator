@@ -28,7 +28,7 @@ internal sealed class LatestTranslationCoordinator : IDisposable
             fingerprint,
             targetLanguage.Trim().ToUpperInvariant());
 
-        CancellationTokenSource? operationToCancel;
+        CancellationTokenSource? operationToCancel = null;
 
         lock (_gate)
         {
@@ -37,8 +37,17 @@ internal sealed class LatestTranslationCoordinator : IDisposable
                 return false;
             }
 
+            var targetLanguageChanged = _latestKey is { } previousKey &&
+                                        !previousKey.TargetLanguage.Equals(
+                                            key.TargetLanguage,
+                                            StringComparison.Ordinal);
+
             _latestKey = key;
-            operationToCancel = _activeOperation;
+
+            if (targetLanguageChanged)
+            {
+                operationToCancel = _activeOperation;
+            }
         }
 
         CancelQuietly(operationToCancel);
@@ -61,11 +70,12 @@ internal sealed class LatestTranslationCoordinator : IDisposable
         }
     }
 
-    public bool IsLatest(TranslationRequestKey key)
+    public bool CanPublish(TranslationRequestKey key)
     {
         lock (_gate)
         {
-            return _latestKey == key;
+            return _latestKey is { } latestKey &&
+                   latestKey.TargetLanguage.Equals(key.TargetLanguage, StringComparison.Ordinal);
         }
     }
 

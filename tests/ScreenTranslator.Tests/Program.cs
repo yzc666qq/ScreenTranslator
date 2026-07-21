@@ -25,7 +25,7 @@ internal static class Program
         Run("OCR layout preserves indentation and blank lines", TestOcrLayoutFormatting);
         Run("Application icon assets are valid", TestApplicationIconAssets);
         Run("Unchanged OCR text is not translated twice", TestRecognizedTextChangeTracking);
-        Run("New OCR state cancels stale translation work", TestLatestTranslationCoordination);
+        Run("OCR churn keeps translation work progressing", TestLatestTranslationCoordination);
         Run("Global F1 and F2 hotkeys map to translation commands", TestGlobalHotkeyMapping);
         Run("Main controls do not stay topmost", TestMainWindowLayering);
         Run("Windows use sharp DPI-aware rendering without visible scrollbars", TestSharpRenderingSettings);
@@ -165,12 +165,19 @@ internal static class Program
 
         var chineseOperation = coordinator.TryBegin(chineseKey, CancellationToken.None)
             ?? throw new InvalidOperationException("The latest queued work must be allowed to start.");
-        Assert(coordinator.TryObserve("first", "en", out var englishKey),
+        Assert(coordinator.TryObserve("second", "zh-CN", out _),
+            "Changed source text must replace the pending translation state.");
+        Assert(!chineseOperation.IsCancellationRequested,
+            "OCR source changes must not repeatedly cancel a slow in-flight translation.");
+        Assert(coordinator.CanPublish(chineseKey),
+            "A completed request may publish while newer source text waits for the same target language.");
+
+        Assert(coordinator.TryObserve("second", "en", out var englishKey),
             "Changing only the target language must queue a new translation.");
         Assert(chineseOperation.IsCancellationRequested,
-            "Changing translation state must cancel the stale in-flight request.");
-        Assert(!coordinator.IsLatest(chineseKey) && coordinator.IsLatest(englishKey),
-            "Only the newest translation state may update the output.");
+            "Changing the target language must cancel the now-unusable in-flight request.");
+        Assert(!coordinator.CanPublish(chineseKey) && coordinator.CanPublish(englishKey),
+            "Only results for the current target language may update the output.");
         coordinator.End(chineseOperation);
 
         var englishOperation = coordinator.TryBegin(englishKey, CancellationToken.None)
