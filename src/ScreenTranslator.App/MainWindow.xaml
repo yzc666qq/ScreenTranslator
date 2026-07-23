@@ -1,0 +1,404 @@
+<Window x:Class="ScreenTranslator.App.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
+        Title="Screen Translator"
+        Icon="Assets/app-icon.ico"
+        Width="660"
+        Height="780"
+        MinWidth="580"
+        MinHeight="660"
+        Background="{StaticResource WindowBackgroundBrush}"
+        FontFamily="Microsoft YaHei UI"
+        ResizeMode="CanResizeWithGrip"
+        SnapsToDevicePixels="True"
+        TextOptions.TextFormattingMode="Display"
+        TextOptions.TextHintingMode="Fixed"
+        TextOptions.TextRenderingMode="ClearType"
+        Topmost="False"
+        UseLayoutRounding="True"
+        WindowStartupLocation="CenterScreen"
+        WindowStyle="None">
+    <shell:WindowChrome.WindowChrome>
+        <shell:WindowChrome CaptionHeight="0"
+                            CornerRadius="16"
+                            GlassFrameThickness="0"
+                            ResizeBorderThickness="6"
+                            UseAeroCaptionButtons="False" />
+    </shell:WindowChrome.WindowChrome>
+    <Window.Resources>
+        <Style x:Key="WindowButtonStyle" TargetType="Button">
+            <Setter Property="Width" Value="34" />
+            <Setter Property="Height" Value="34" />
+            <Setter Property="Margin" Value="2,0" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Foreground" Value="{StaticResource MutedTextBrush}" />
+            <Setter Property="FontSize" Value="16" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="WindowButtonSurface"
+                                Background="{TemplateBinding Background}"
+                                CornerRadius="8">
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="WindowButtonSurface" Property="Background" Value="#FF202A34" />
+                                <Setter Property="Foreground" Value="{StaticResource PrimaryTextBrush}" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <DataTemplate x:Key="FontPreviewTemplate">
+            <Grid Margin="2,1">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="130" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <TextBlock FontFamily="{Binding FontFamily}"
+                           FontSize="16"
+                           Foreground="{StaticResource PrimaryTextBrush}"
+                           Text="{Binding DisplayName}" />
+                <TextBlock Grid.Column="1"
+                           FontFamily="{Binding FontFamily}"
+                           FontSize="14"
+                           Foreground="{StaticResource MutedTextBrush}"
+                           Text="译文 Aa 123" />
+            </Grid>
+        </DataTemplate>
+    </Window.Resources>
+
+    <Border x:Name="MainSurface"
+            Background="{StaticResource WindowBackgroundBrush}"
+            BorderBrush="{StaticResource BorderBrush}"
+            BorderThickness="1"
+            CornerRadius="18">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="68" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="94" />
+            </Grid.RowDefinitions>
+
+            <Grid Grid.Row="0"
+                  Margin="20,0,12,0"
+                  Background="Transparent"
+                  MouseLeftButtonDown="Header_MouseLeftButtonDown">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <Image x:Name="BrandIcon"
+                       Width="40"
+                       Height="40"
+                       Margin="0,0,12,0"
+                       RenderOptions.BitmapScalingMode="HighQuality"
+                       Source="Assets/app-icon.png"
+                       Stretch="Uniform" />
+
+                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                    <TextBlock FontSize="16"
+                               FontWeight="SemiBold"
+                               Foreground="{StaticResource PrimaryTextBrush}"
+                               Text="Screen Translator" />
+                    <TextBlock Margin="0,2,0,0"
+                               FontSize="11"
+                               Foreground="{StaticResource MutedTextBrush}"
+                               Text="选区 · 识别 · 实时翻译" />
+                </StackPanel>
+
+                <Button Grid.Column="2"
+                        Click="MinimizeButton_Click"
+                        Content="—"
+                        Style="{StaticResource WindowButtonStyle}"
+                        ToolTip="最小化" />
+                <Button Grid.Column="3"
+                        Click="CloseButton_Click"
+                        Content="×"
+                        Style="{StaticResource WindowButtonStyle}"
+                        ToolTip="关闭" />
+            </Grid>
+
+            <Border Grid.Row="0"
+                    VerticalAlignment="Bottom"
+                    BorderBrush="{StaticResource BorderBrush}"
+                    BorderThickness="0,0,0,1" />
+
+            <ScrollViewer x:Name="ContentScrollViewer"
+                          Grid.Row="1"
+                          HorizontalScrollBarVisibility="Disabled"
+                          PanningMode="VerticalOnly"
+                          VerticalScrollBarVisibility="Hidden">
+                <StackPanel Margin="22,18,22,22">
+                    <Border x:Name="StatusCard" Style="{StaticResource CardStyle}">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <Border Width="4"
+                                    Margin="0,1,13,1"
+                                    Background="{StaticResource AccentBrush}"
+                                    CornerRadius="2" />
+                            <StackPanel Grid.Column="1">
+                                <TextBlock x:Name="StatusText"
+                                           FontWeight="SemiBold"
+                                           Foreground="{StaticResource PrimaryTextBrush}"
+                                           Text="请选择需要翻译的屏幕区域" />
+                                <TextBlock x:Name="StatusDetailText"
+                                           Margin="0,4,0,0"
+                                           FontSize="11"
+                                           Foreground="{StaticResource MutedTextBrush}"
+                                           Text="密钥只保存在当前进程中" />
+                            </StackPanel>
+                            <Ellipse x:Name="StatusDot"
+                                     Grid.Column="2"
+                                     Width="8"
+                                     Height="8"
+                                     Margin="14,3,1,0"
+                                     VerticalAlignment="Top"
+                                     Fill="{StaticResource AccentBrush}" />
+                        </Grid>
+                    </Border>
+
+                    <TextBlock Margin="2,18,0,9"
+                               Style="{StaticResource SectionLabelStyle}"
+                               Text="捕获" />
+                    <Border Style="{StaticResource CardStyle}">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="18" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel>
+                                <TextBlock Style="{StaticResource FieldLabelStyle}" Text="屏幕区域" />
+                                <Button x:Name="SelectRegionButton"
+                                        Click="SelectRegionButton_Click"
+                                        Content="框选区域"
+                                        Style="{StaticResource SecondaryButtonStyle}"
+                                        ToolTip="F1：重选区域" />
+                                <TextBlock x:Name="RegionText"
+                                           Margin="1,7,0,0"
+                                           FontSize="11"
+                                           Foreground="{StaticResource MutedTextBrush}"
+                                           Text="尚未选择" />
+                            </StackPanel>
+
+                            <StackPanel Grid.Column="2">
+                                <TextBlock Style="{StaticResource FieldLabelStyle}" Text="显示模式" />
+                                <ComboBox x:Name="ModeComboBox"
+                                          SelectedIndex="0"
+                                          SelectionChanged="ModeComboBox_SelectionChanged"
+                                          Style="{StaticResource InputComboBoxStyle}">
+                                    <ComboBoxItem Content="覆盖所选区域" />
+                                    <ComboBoxItem Content="独立侧边面板" />
+                                </ComboBox>
+                                <TextBlock Margin="1,7,0,0"
+                                           FontSize="11"
+                                           Foreground="{StaticResource MutedTextBrush}"
+                                           Text="侧边面板可移动、缩放和锁定" />
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+
+                    <TextBlock Margin="2,18,0,9"
+                               Style="{StaticResource SectionLabelStyle}"
+                               Text="译文" />
+                    <Border Style="{StaticResource CardStyle}">
+                        <StackPanel>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="18" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel>
+                                    <TextBlock Style="{StaticResource FieldLabelStyle}" Text="目标语言 · 自动检测源语言" />
+                                    <ComboBox x:Name="TargetLanguageComboBox"
+                                              IsEditable="True"
+                                              SelectedIndex="0"
+                                              Style="{StaticResource InputComboBoxStyle}">
+                                        <ComboBoxItem Content="简体中文" Tag="zh-CN" />
+                                        <ComboBoxItem Content="English" Tag="en" />
+                                        <ComboBoxItem Content="日本語" Tag="ja" />
+                                        <ComboBoxItem Content="한국어" Tag="ko" />
+                                    </ComboBox>
+                                </StackPanel>
+                                <StackPanel Grid.Column="2">
+                                    <TextBlock Style="{StaticResource FieldLabelStyle}" Text="刷新间隔" />
+                                    <ComboBox x:Name="IntervalComboBox"
+                                              SelectedIndex="1"
+                                              Style="{StaticResource InputComboBoxStyle}">
+                                        <ComboBoxItem Content="0.7 秒" Tag="700" />
+                                        <ComboBoxItem Content="1.0 秒" Tag="1000" />
+                                        <ComboBoxItem Content="1.5 秒" Tag="1500" />
+                                        <ComboBoxItem Content="2.5 秒" Tag="2500" />
+                                    </ComboBox>
+                                </StackPanel>
+                            </Grid>
+
+                            <Grid Margin="0,15,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="2*" />
+                                    <ColumnDefinition Width="18" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel>
+                                    <TextBlock Style="{StaticResource FieldLabelStyle}" Text="字体" />
+                                    <ComboBox x:Name="TranslationFontFamilyComboBox"
+                                              IsEditable="False"
+                                              IsTextSearchEnabled="True"
+                                              ItemTemplate="{StaticResource FontPreviewTemplate}"
+                                              MaxDropDownHeight="300"
+                                              SelectionChanged="TranslationFontFamilyComboBox_SelectionChanged"
+                                              Style="{StaticResource InputComboBoxStyle}" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="2">
+                                    <TextBlock Style="{StaticResource FieldLabelStyle}" Text="字号" />
+                                    <Grid Height="38">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="34" />
+                                        </Grid.ColumnDefinitions>
+                                        <Slider x:Name="TranslationFontSizeSlider"
+                                                Minimum="10"
+                                                Maximum="48"
+                                                TickFrequency="1"
+                                                IsSnapToTickEnabled="True"
+                                                Value="18"
+                                                ValueChanged="TranslationFontSizeSlider_ValueChanged" />
+                                        <TextBlock x:Name="TranslationFontSizeText"
+                                                   Grid.Column="1"
+                                                   HorizontalAlignment="Right"
+                                                   VerticalAlignment="Center"
+                                                   Foreground="{StaticResource MutedTextBrush}" />
+                                    </Grid>
+                                </StackPanel>
+                            </Grid>
+
+                            <StackPanel Margin="0,15,0,0">
+                                <Grid>
+                                    <TextBlock Style="{StaticResource FieldLabelStyle}" Text="覆盖层透明度" />
+                                    <TextBlock x:Name="OverlayOpacityText"
+                                               HorizontalAlignment="Right"
+                                               Foreground="{StaticResource MutedTextBrush}" />
+                                </Grid>
+                                <Slider x:Name="OverlayOpacitySlider"
+                                        Minimum="0.35"
+                                        Maximum="1"
+                                        Value="0.88"
+                                        ValueChanged="OverlayOpacitySlider_ValueChanged" />
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <TextBlock Margin="2,18,0,9"
+                               x:Name="ProviderSectionLabel"
+                               Style="{StaticResource SectionLabelStyle}"
+                               Text="翻译引擎" />
+                    <Border Style="{StaticResource CardStyle}">
+                        <StackPanel>
+                            <TextBlock Style="{StaticResource FieldLabelStyle}" Text="翻译方式" />
+                            <ComboBox x:Name="TranslationEngineComboBox"
+                                      SelectedIndex="2"
+                                      SelectionChanged="TranslationEngineComboBox_SelectionChanged"
+                                      Style="{StaticResource InputComboBoxStyle}">
+                                <ComboBoxItem Content="DeepSeek / OpenAI 兼容" Tag="openai" />
+                                <ComboBoxItem Content="高质量离线 · Qwen2.5" Tag="qwen-local" />
+                                <ComboBoxItem Content="快速离线 · LibreTranslate" Tag="libretranslate-local" />
+                                <ComboBoxItem Content="外部服务 · LibreTranslate" Tag="libretranslate-external" />
+                            </ComboBox>
+
+                            <StackPanel x:Name="EndpointPanel">
+                                <TextBlock Margin="0,15,0,7"
+                                           Style="{StaticResource FieldLabelStyle}"
+                                           Text="服务地址" />
+                                <TextBox x:Name="EndpointTextBox"
+                                         Style="{StaticResource InputTextBoxStyle}"
+                                         Text="https://api.deepseek.com/chat/completions" />
+                            </StackPanel>
+
+                            <Grid x:Name="CloudOptionsPanel" Margin="0,15,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="18" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel>
+                                    <TextBlock Style="{StaticResource FieldLabelStyle}" Text="模型" />
+                                    <TextBox x:Name="ModelTextBox"
+                                             Style="{StaticResource InputTextBoxStyle}"
+                                             Text="deepseek-v4-flash" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="2">
+                                    <TextBlock Style="{StaticResource FieldLabelStyle}" Text="API 密钥" />
+                                    <PasswordBox x:Name="ApiKeyPasswordBox"
+                                                 Style="{StaticResource InputPasswordBoxStyle}" />
+                                </StackPanel>
+                            </Grid>
+
+                            <TextBlock x:Name="ProviderHintText"
+                                       Margin="1,9,0,0"
+                                       FontSize="11"
+                                       Foreground="{StaticResource MutedTextBrush}"
+                                       Text="也可使用 DEEPSEEK_API_KEY；仅在识别文本变化时请求模型。" />
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+            </ScrollViewer>
+
+            <Border x:Name="ActionFooter"
+                    Grid.Row="2"
+                    Padding="22,13,22,12"
+                    Background="{StaticResource SurfaceBrush}"
+                    BorderBrush="{StaticResource BorderBrush}"
+                    BorderThickness="0,1,0,0"
+                    CornerRadius="0,0,18,18">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="42" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="160" />
+                        <ColumnDefinition Width="12" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+
+                    <Button Grid.Column="0"
+                            Click="SelectRegionButton_Click"
+                            Content="重新框选 · F1"
+                            Style="{StaticResource SecondaryButtonStyle}"
+                            ToolTip="运行中按 F1 会在重选后继续翻译" />
+                    <Button x:Name="StartStopButton"
+                            Grid.Column="2"
+                            Click="StartStopButton_Click"
+                            Content="开始实时翻译"
+                            Style="{StaticResource PrimaryButtonStyle}"
+                            ToolTip="F2：停止翻译并隐藏译文" />
+
+                    <TextBlock x:Name="ShortcutHelpText"
+                               Grid.Row="1"
+                               Grid.ColumnSpan="3"
+                               Margin="0,8,0,0"
+                               HorizontalAlignment="Center"
+                               FontSize="10.5"
+                               Foreground="{StaticResource MutedTextBrush}"
+                               Text="全局快捷键  F1 重选区域   ·   F2 停止并隐藏译文" />
+                </Grid>
+            </Border>
+        </Grid>
+    </Border>
+</Window>
