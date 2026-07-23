@@ -1,6 +1,6 @@
 # ScreenTranslator
 
-ScreenTranslator 是一个 Windows 透明置顶实时翻译工具。它可以框选任意屏幕区域，在本机持续截图并使用 Windows OCR 识别文字，然后通过 DeepSeek、其他 OpenAI 兼容模型或本机 LibreTranslate/Argos 引擎翻译发生变化的文本。
+ScreenTranslator 是一个 Windows 透明置顶实时翻译工具。它可以框选任意屏幕区域，在本机持续截图并使用 Windows OCR 识别文字，然后通过内置 Qwen2.5 离线模型、DeepSeek、其他 OpenAI 兼容模型或外部 LibreTranslate 服务翻译发生变化的文本。
 
 界面采用简约深色风格与青绿色强调色，并提供专用的窗口、任务栏和可执行文件图标。
 
@@ -15,7 +15,8 @@ ScreenTranslator 是一个 Windows 透明置顶实时翻译工具。它可以框
 - OCR 扫描与翻译请求独立运行；新内容只替换尚未开始的过时任务，待翻译队列始终保留最新结果，避免 OCR 波动持续取消慢请求。目标语言变化时才会取消当前请求。
 - 仅当识别文字或目标语言发生变化时请求翻译；云端模式会缓存当前应用会话中已经成功翻译的内容，文本再次出现时复用相同译文。
 - 可编辑的 OpenAI 兼容接口地址和模型名称，默认配置 DeepSeek。
-- 提供无需 API 密钥的 LibreTranslate/Argos 本地离线模式，自动检测源语言，并通过批量按行翻译保留缩进和空行。
+- 默认提供进程内运行的 Qwen2.5 0.5B 离线翻译，无需 Python、Docker、API 密钥或单独启动后台服务；模型按行翻译并缓存稳定结果，同时保留缩进和空行。
+- LibreTranslate 保留为可选的外部本地服务，方便已有部署或偏好传统机器翻译的用户使用。
 - 两种置顶显示模式：
   - **覆盖所选区域**：译文直接覆盖在原区域上，窗口点击穿透，不抢占输入焦点。
   - **独立侧边面板**：可拖动、缩放、调整透明度，也可锁定当前位置和大小。
@@ -41,7 +42,7 @@ dotnet run --project src/ScreenTranslator.App --configuration Debug
 1. 点击“框选区域”，拖动鼠标选择要持续翻译的内容；按 `Esc` 或鼠标右键取消。
 2. 选择“覆盖所选区域”或“独立侧边面板”。
 3. 选择目标语言、刷新间隔、译文字体和字号；源语言会自动检测。
-4. 默认使用本地离线翻译，请确认 LibreTranslate 已在本机启动；如需云端模式，再切换引擎并填写模型接口、模型名称和 API 密钥。
+4. 默认使用“内置离线 · Qwen2.5”。首次开始翻译时程序会自动下载并校验约 469 MiB 的模型，此后无需联网；如需云端或已有的 LibreTranslate 服务，再切换引擎。
 5. 点击“开始实时翻译”。再次点击可停止，译文窗口会保留最后结果。
 
 全局快捷键：
@@ -55,18 +56,19 @@ dotnet run --project src/ScreenTranslator.App --configuration Debug
 
 ## 本地离线翻译
 
-应用使用 [LibreTranslate](https://docs.libretranslate.com/) 提供本机 HTTP 翻译服务，底层由 [Argos Translate](https://github.com/argosopentech/argos-translate) 执行离线翻译。首次安装和下载语言模型需要联网；模型准备完成后，日常截图、OCR 和翻译均可在本机完成，不需要 API 密钥。
+默认引擎通过 [LLamaSharp](https://github.com/SciSharp/LLamaSharp) 在应用进程内运行官方 [Qwen2.5-0.5B-Instruct-GGUF](https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF) 模型。它不依赖 Python、Docker、LibreTranslate 或本机 HTTP 服务。
 
-Windows 上可使用 Python 安装并仅加载常用语言：
+首次使用时，应用会从官方固定版本地址下载 `qwen2.5-0.5b-instruct-q4_k_m.gguf`，验证文件大小和 SHA-256 后保存到：
 
 ```powershell
-py -m pip install libretranslate
-libretranslate --host 127.0.0.1 --port 5000 --load-only en,zh,ja,ko
+%LocalAppData%\ScreenTranslator\Models
 ```
 
-应用默认选择“本地离线 · LibreTranslate”。服务启动后可直接使用；默认地址为 `http://127.0.0.1:5000`，程序会自动调用 `/translate`，无需填写模型或 API 密钥。点击“开始实时翻译”时，程序会先通过 `/languages` 检查服务连接和所选目标语言模型；服务未启动或模型缺失时会直接显示处理提示，不会进入无效的 OCR 重试循环。
+下载过程中会在主窗口显示进度；中断或校验失败的临时文件会被丢弃，下次自动重试。已验证的模型会直接复用，截图、OCR、提示词和译文都留在本机。
 
-为了适合实时屏幕翻译，程序会把每次 OCR 中不重复的非空行合并为一个批量请求，翻译后恢复原始换行、空行、行首缩进和行尾空白，并缓存最近的行译文以减少本机推理次数。云端模式也会使用有容量限制的会话缓存，使 A→B→A 这类重复内容直接复用第一次译文。
+为了适合实时屏幕翻译，程序仅推理每次 OCR 中不重复且尚未缓存的非空行，随后恢复原始换行、空行、行首缩进和行尾空白。相同文字与目标语言会复用同一译文，避免连续扫描时结果漂移。
+
+“外部服务 · LibreTranslate”是高级可选项。已有服务的用户可以填写其地址；程序会在开始前检查服务和目标语言模型是否可用。开发环境中可按 [LibreTranslate 官方文档](https://docs.libretranslate.com/) 自行部署，但默认功能不再要求它。
 
 ## DeepSeek 配置
 
@@ -97,8 +99,8 @@ Windows OCR 会提供每个单词的屏幕坐标。程序利用这些坐标重�
 ## 隐私与密钥
 
 - 截图和 OCR 在本机完成。
-- 只有 OCR 识别出的文字会在用户启动翻译后发送到所配置的模型接口。
-- 选择默认的本地离线地址时，OCR 文字只会发送到本机 `127.0.0.1` 上的 LibreTranslate 服务。
+- 默认内置离线模式中，OCR 文字与译文始终留在当前应用进程内；首次下载只获取模型文件，不上传屏幕内容。
+- 切换到云端或外部服务后，只有 OCR 识别出的文字会在用户启动翻译后发送到所配置的接口。
 - API 密钥仅保存在当前进程内存中，或由当前用户环境变量提供；程序不会把密钥写入仓库配置。
 - 请只框选你有权发送给所选模型服务的内容。
 
@@ -116,11 +118,17 @@ dotnet run --project tests/ScreenTranslator.Tests --configuration Debug
 dotnet run --project tests/ScreenTranslator.Tests --configuration Debug -- --screen-capture
 ```
 
-测试覆盖 OCR 格式重建、框选窗口范围、两种译文窗口、侧栏锁定和透明度、翻译引擎切换、本地服务与目标模型就绪检查、本地批量翻译与缓存、目标语言解析、未翻译结果自动重试、DeepSeek/通用 OpenAI 请求差异、响应空白保持、Windows OCR，以及真实屏幕截图到 OCR 的链路。
+测试覆盖 OCR 格式重建、框选窗口范围、两种译文窗口、侧栏锁定和透明度、翻译引擎切换、内置模型下载校验与复用、离线逐行翻译与缓存、外部本地服务就绪检查、目标语言解析、未翻译结果自动重试、DeepSeek/通用 OpenAI 请求差异、响应空白保持、Windows OCR，以及真实屏幕截图到 OCR 的链路。
+
+若要执行会下载官方模型的真实本地推理验证：
+
+```powershell
+dotnet run --project tests/ScreenTranslator.Tests --configuration Release -- --local-model
+```
 
 ## 当前边界
 
 - 云端翻译需要用户自行提供对应服务的有效 API 密钥和账户额度。
-- 本地离线模式需要用户先安装 LibreTranslate 和所需语言模型；其自然度与复杂上下文能力通常弱于云端大模型。
+- 内置离线模式首次使用需要联网下载约 469 MiB 模型，并占用相应磁盘空间；0.5B 小模型的自然度与复杂上下文能力通常弱于云端大模型。
 - 翻译结果能保持段落和列表结构，但不会逐字覆盖到每个原始单词的精确位置。
 - 当前版本未包含安装包和托盘图标，可直接通过 `dotnet run` 或构建后的可执行文件运行。

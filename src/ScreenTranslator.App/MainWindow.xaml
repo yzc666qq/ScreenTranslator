@@ -316,15 +316,18 @@
                                       SelectionChanged="TranslationEngineComboBox_SelectionChanged"
                                       Style="{StaticResource InputComboBoxStyle}">
                                 <ComboBoxItem Content="DeepSeek / OpenAI 兼容" Tag="openai" />
-                                <ComboBoxItem Content="本地离线 · LibreTranslate" Tag="libretranslate" />
+                                <ComboBoxItem Content="内置离线 · Qwen2.5" Tag="qwen-local" />
+                                <ComboBoxItem Content="外部服务 · LibreTranslate" Tag="libretranslate" />
                             </ComboBox>
 
-                            <TextBlock Margin="0,15,0,7"
-                                       Style="{StaticResource FieldLabelStyle}"
-                                       Text="服务地址" />
-                            <TextBox x:Name="EndpointTextBox"
-                                     Style="{StaticResource InputTextBoxStyle}"
-                                     Text="https://api.deepseek.com/chat/completions" />
+                            <StackPanel x:Name="EndpointPanel">
+                                <TextBlock Margin="0,15,0,7"
+                                           Style="{StaticResource FieldLabelStyle}"
+                                           Text="服务地址" />
+                                <TextBox x:Name="EndpointTextBox"
+                                         Style="{StaticResource InputTextBoxStyle}"
+                                         Text="https://api.deepseek.com/chat/completions" />
+                            </StackPanel>
 
                             <Grid x:Name="CloudOptionsPanel" Margin="0,15,0,0">
                                 <Grid.ColumnDefinitions>

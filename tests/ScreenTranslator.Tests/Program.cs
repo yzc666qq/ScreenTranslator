@@ -3,6 +3,7 @@ using System.IO;
 using System.Net;
 using System.Net.Http;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Windows.Controls;
@@ -33,6 +34,8 @@ internal static class Program
         Run("Selected region indicator is transparent and subtle", TestRegionIndicatorWindow);
         Run("Side panel supports locking, resizing and opacity", TestSidePanelControls);
         Run("Overlay preserves translated text and region", TestOverlayWindow);
+        Run("Integrated Qwen translation preserves layout and caches lines", () => TestQwenLocalTranslationAsync().GetAwaiter().GetResult());
+        Run("Integrated model download is verified and reused", () => TestLocalModelStoreAsync().GetAwaiter().GetResult());
         Run("LibreTranslate adapter preserves layout and batches local requests", () => TestLibreTranslateAdapterAsync().GetAwaiter().GetResult());
         Run("LibreTranslate readiness validates service and target models", () => TestLibreTranslateReadinessAsync().GetAwaiter().GetResult());
         Run("DeepSeek adapter preserves formatting", () => TestDeepSeekAdapterAsync().GetAwaiter().GetResult());
@@ -51,6 +54,11 @@ internal static class Program
         if (args.Contains("--render-ui", StringComparer.OrdinalIgnoreCase))
         {
             Run("Main window renders to a visual preview", TestRenderMainWindowPreview);
+        }
+
+        if (args.Contains("--local-model", StringComparer.OrdinalIgnoreCase))
+        {
+            Run("Official Qwen model translates locally end to end", () => TestIntegratedLocalModelAsync().GetAwaiter().GetResult());
         }
 
         Console.WriteLine($"RESULT passed={_passed} failed={_failed}");
@@ -293,6 +301,7 @@ internal static class Program
         var shortcutHelp = (TextBlock)mainWindow.FindName("ShortcutHelpText");
         var translationEngine = (System.Windows.Controls.ComboBox)mainWindow.FindName("TranslationEngineComboBox");
         var endpoint = (System.Windows.Controls.TextBox)mainWindow.FindName("EndpointTextBox");
+        var endpointPanel = (StackPanel)mainWindow.FindName("EndpointPanel");
         var cloudOptions = (Grid)mainWindow.FindName("CloudOptionsPanel");
         var providerHint = (TextBlock)mainWindow.FindName("ProviderHintText");
         Assert(shortcutHelp.Text.Contains("F1", StringComparison.Ordinal) &&
@@ -305,14 +314,20 @@ internal static class Program
         Assert(previewTemplate is not null, "Font choices must use a visual preview template.");
 
         AssertEqual(1, translationEngine.SelectedIndex);
-        AssertEqual("http://127.0.0.1:5000", endpoint.Text);
+        AssertEqual(System.Windows.Visibility.Collapsed, endpointPanel.Visibility);
         AssertEqual(System.Windows.Visibility.Collapsed, cloudOptions.Visibility);
-        Assert(providerHint.Text.Contains("无需 API 密钥", StringComparison.Ordinal),
-            "The default local offline provider must explain that no API key is required.");
+        Assert(providerHint.Text.Contains("无需 API 密钥或后台服务", StringComparison.Ordinal),
+            "The integrated provider must explain that it needs neither a key nor a background service.");
+        Assert(translationEngine.SelectedItem is ComboBoxItem selectedEngine &&
+               selectedEngine.Content?.ToString()?.Contains("内置离线", StringComparison.Ordinal) == true,
+            "The integrated Qwen engine must be selected by default.");
         translationEngine.SelectedIndex = 0;
+        AssertEqual(System.Windows.Visibility.Visible, endpointPanel.Visibility);
         AssertEqual(System.Windows.Visibility.Visible, cloudOptions.Visibility);
-        translationEngine.SelectedIndex = 1;
+        translationEngine.SelectedIndex = 2;
+        AssertEqual(System.Windows.Visibility.Visible, endpointPanel.Visibility);
         AssertEqual(System.Windows.Visibility.Collapsed, cloudOptions.Visibility);
+        AssertEqual("http://127.0.0.1:5000", endpoint.Text);
 
         foreach (var fontOption in fontFamily.Items)
         {
@@ -521,6 +536,101 @@ internal static class Program
         var cachedResult = await service.TranslateAsync(source, "auto", "zh-CN");
         AssertEqual(translated, cachedResult.TranslatedText);
         AssertEqual(1, handler.RequestCount);
+    }
+
+    private static async Task TestQwenLocalTranslationAsync()
+    {
+        const string source = "  Hello\r\n\r\nWorld  \nHello";
+        const string translated = "  你好\r\n\r\n世界  \n你好";
+        var runtime = new FakeLocalModelRuntime(["“你好”", "Translation: 世界\n"]);
+        var service = new QwenLocalTranslationService(runtime);
+
+        var result = await service.TranslateAsync(source, "auto", "zh-CN");
+
+        AssertEqual(source, result.SourceText);
+        AssertEqual(translated, result.TranslatedText);
+        AssertEqual("auto", result.SourceLanguage);
+        AssertEqual("zh", result.TargetLanguage);
+        AssertEqual(2, runtime.Prompts.Count);
+        Assert(runtime.Prompts.All(prompt =>
+                prompt.Contains("Simplified Chinese", StringComparison.Ordinal) &&
+                prompt.Contains("Detect the source language automatically", StringComparison.Ordinal)),
+            "Every local request must explicitly auto-detect the source language and use the selected target.");
+        var normalizedPrompt = runtime.Prompts[0].Replace("\r\n", "\n", StringComparison.Ordinal);
+        Assert(normalizedPrompt.Contains("<source>\nHello\n</source>", StringComparison.Ordinal),
+            "The source text must be isolated from model instructions.");
+        AssertEqual(1, runtime.InitializeCount);
+
+        var cached = await service.TranslateAsync(source, "auto", "zh-CN");
+        AssertEqual(translated, cached.TranslatedText);
+        AssertEqual(2, runtime.Prompts.Count);
+    }
+
+    private static async Task TestLocalModelStoreAsync()
+    {
+        var payload = Encoding.UTF8.GetBytes("small verified model fixture");
+        var descriptor = new LocalModelDescriptor(
+            "fixture.gguf",
+            new Uri("https://example.test/models/fixture.gguf"),
+            payload.LongLength,
+            Convert.ToHexStringLower(SHA256.HashData(payload)));
+        var handler = new RecordingHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new ByteArrayContent(payload)
+        });
+        using var client = new HttpClient(handler);
+        var directory = Path.Combine(
+            Path.GetTempPath(),
+            $"ScreenTranslator-model-test-{Guid.NewGuid():N}");
+        var store = new LocalModelStore(client, descriptor, directory);
+        var updates = new List<LocalModelProgress>();
+        var progress = new DelegateProgress<LocalModelProgress>(updates.Add);
+
+        try
+        {
+            var firstPath = await store.EnsureModelAsync(progress);
+            var secondPath = await store.EnsureModelAsync(progress);
+
+            AssertEqual(firstPath, secondPath);
+            AssertEqual(1, handler.RequestCount);
+            Assert(File.ReadAllBytes(firstPath).SequenceEqual(payload),
+                "The downloaded model bytes must match the verified payload.");
+            Assert(updates.Any(update =>
+                    update.BytesReceived == payload.LongLength &&
+                    update.TotalBytes == payload.LongLength),
+                "Model preparation must report completed byte progress.");
+        }
+        finally
+        {
+            if (File.Exists(store.ModelPath))
+            {
+                File.Delete(store.ModelPath);
+            }
+
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory);
+            }
+        }
+    }
+
+    private static async Task TestIntegratedLocalModelAsync()
+    {
+        using var client = new HttpClient { Timeout = Timeout.InfiniteTimeSpan };
+        var store = new LocalModelStore(client);
+        using var runtime = new LlamaSharpLocalModelRuntime(store);
+        var service = new QwenLocalTranslationService(runtime);
+        var progress = new DelegateProgress<LocalModelProgress>(
+            update => Console.WriteLine($"MODEL {update.Title}: {update.Detail}"));
+
+        await service.InitializeAsync(progress);
+        var result = await service.TranslateAsync("Hello world", "auto", "zh-CN");
+        Console.WriteLine($"LOCAL TRANSLATION {result.TranslatedText}");
+
+        Assert(!string.IsNullOrWhiteSpace(result.TranslatedText),
+            "The integrated model must produce a non-empty translation.");
+        Assert(result.TranslatedText.Any(character => character is >= '\u3400' and <= '\u9fff'),
+            $"Expected a Chinese translation but received: {result.TranslatedText}");
     }
 
     private static async Task TestLibreTranslateReadinessAsync()
@@ -929,5 +1039,39 @@ internal static class Program
             RequestCount++;
             return responseFactory(request);
         }
+    }
+
+    private sealed class FakeLocalModelRuntime(IEnumerable<string> responses) : ILocalModelRuntime
+    {
+        private readonly Queue<string> _responses = new(responses);
+
+        public int InitializeCount { get; private set; }
+
+        public List<string> Prompts { get; } = [];
+
+        public Task InitializeAsync(
+            IProgress<LocalModelProgress>? progress = null,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            InitializeCount++;
+            return Task.CompletedTask;
+        }
+
+        public Task<string> GenerateAsync(
+            string prompt,
+            int maximumTokens,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Assert(maximumTokens > 0, "Local generation must have a positive token budget.");
+            Prompts.Add(prompt);
+            return Task.FromResult(_responses.Dequeue());
+        }
+    }
+
+    private sealed class DelegateProgress<T>(Action<T> report) : IProgress<T>
+    {
+        public void Report(T value) => report(value);
     }
 }
