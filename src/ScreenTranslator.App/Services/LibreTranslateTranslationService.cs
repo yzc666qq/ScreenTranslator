@@ -9,12 +9,14 @@ namespace ScreenTranslator.App.Services;
 public sealed class LibreTranslateTranslationService(HttpClient httpClient) : ITranslationService
 {
     private const int MaximumCachedLines = 512;
+    private static readonly TimeSpan ReadinessTimeout = TimeSpan.FromSeconds(5);
     private static readonly Regex LineSeparatorPattern = new(
         "(\\r\\n|\\n|\\r)",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     private readonly Dictionary<CacheKey, string> _translationCache = [];
     private Uri? _translateEndpoint;
+    private Uri? _languagesEndpoint;
 
     public void Configure(Uri endpoint)
     {
@@ -26,12 +28,128 @@ public sealed class LibreTranslateTranslationService(HttpClient httpClient) : IT
             throw new ArgumentException("本地翻译地址必须是完整的 HTTP 或 HTTPS 地址。", nameof(endpoint));
         }
 
-        var translateEndpoint = BuildTranslateEndpoint(endpoint);
+        var translateEndpoint = BuildActionEndpoint(endpoint, "translate");
+        var languagesEndpoint = BuildActionEndpoint(endpoint, "languages");
 
         if (_translateEndpoint != translateEndpoint)
         {
             _translationCache.Clear();
             _translateEndpoint = translateEndpoint;
+        }
+
+        _languagesEndpoint = languagesEndpoint;
+    }
+
+    public async Task<TranslationServiceReadiness> CheckReadinessAsync(
+        string targetLanguage,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(targetLanguage);
+
+        var endpoint = _languagesEndpoint
+            ?? throw new InvalidOperationException("尚未配置本地离线翻译服务。");
+        var normalizedTargetLanguage = NormalizeLanguageCode(targetLanguage, allowAuto: false);
+        using var timeoutCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutCancellation.CancelAfter(ReadinessTimeout);
+        using var request = new HttpRequestMessage(HttpMethod.Get, endpoint);
+
+        HttpResponseMessage response;
+
+        try
+        {
+            response = await httpClient.SendAsync(request, timeoutCancellation.Token);
+        }
+        catch (HttpRequestException)
+        {
+            return Unavailable(
+                $"无法连接 {endpoint.GetLeftPart(UriPartial.Authority)}。" +
+                "请先启动 LibreTranslate，再重新点击“开始实时翻译”。");
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return Unavailable(
+                $"连接 {endpoint.GetLeftPart(UriPartial.Authority)} 超时。" +
+                "请确认 LibreTranslate 已启动且语言模型已加载完成。");
+        }
+
+        using (response)
+        {
+            string responseBody;
+
+            try
+            {
+                responseBody = await response.Content.ReadAsStringAsync(timeoutCancellation.Token);
+            }
+            catch (HttpRequestException)
+            {
+                return Unavailable("读取 LibreTranslate 语言列表失败，请确认服务仍在运行。");
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                return Unavailable(
+                    $"读取 {endpoint.GetLeftPart(UriPartial.Authority)} 的语言列表超时。" +
+                    "请确认语言模型已加载完成。");
+            }
+
+            if (!response.IsSuccessStatusCode)
+            {
+                return Unavailable(
+                    $"LibreTranslate 的 /languages 接口返回 {(int)response.StatusCode}: " +
+                    GetErrorSummary(responseBody));
+            }
+
+            try
+            {
+                using var document = JsonDocument.Parse(responseBody);
+
+                if (document.RootElement.ValueKind != JsonValueKind.Array)
+                {
+                    return Unavailable("LibreTranslate 返回的语言列表格式无效，请检查服务版本或接口地址。");
+                }
+
+                var supportedLanguages = document.RootElement
+                    .EnumerateArray()
+                    .Select(item => item.ValueKind == JsonValueKind.Object &&
+                                    item.TryGetProperty("code", out var code) &&
+                                    code.ValueKind == JsonValueKind.String
+                        ? code.GetString()
+                        : null)
+                    .Where(code => !string.IsNullOrWhiteSpace(code))
+                    .Select(code => NormalizeLanguageCode(code!, allowAuto: false))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .OrderBy(code => code, StringComparer.OrdinalIgnoreCase)
+                    .ToArray();
+                var supportedTargets = document.RootElement
+                    .EnumerateArray()
+                    .SelectMany(GetSupportedTargets)
+                    .Concat(supportedLanguages)
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+                if (supportedLanguages.Length == 0)
+                {
+                    return Unavailable(
+                        "LibreTranslate 返回的语言列表不包含有效语言，请检查模型是否加载完成。");
+                }
+
+                if (!supportedTargets.Contains(normalizedTargetLanguage))
+                {
+                    return new TranslationServiceReadiness(
+                        TranslationServiceReadinessState.TargetLanguageUnavailable,
+                        $"当前服务未加载目标语言“{normalizedTargetLanguage}”。" +
+                        $"已加载：{string.Join("、", supportedLanguages)}。" +
+                        "请安装对应 Argos 模型并重启服务。",
+                        supportedLanguages);
+                }
+
+                return new TranslationServiceReadiness(
+                    TranslationServiceReadinessState.Ready,
+                    $"LibreTranslate 已就绪，目标语言：{normalizedTargetLanguage}",
+                    supportedLanguages);
+            }
+            catch (JsonException)
+            {
+                return Unavailable("LibreTranslate 返回的语言列表不是有效 JSON，请检查服务版本或接口地址。");
+            }
         }
     }
 
@@ -224,7 +342,7 @@ public sealed class LibreTranslateTranslationService(HttpClient httpClient) : IT
         }
     }
 
-    private static Uri BuildTranslateEndpoint(Uri endpoint)
+    private static Uri BuildActionEndpoint(Uri endpoint, string action)
     {
         var builder = new UriBuilder(endpoint)
         {
@@ -233,14 +351,39 @@ public sealed class LibreTranslateTranslationService(HttpClient httpClient) : IT
         };
         var path = builder.Path.TrimEnd('/');
 
-        if (!path.EndsWith("/translate", StringComparison.OrdinalIgnoreCase))
+        if (path.EndsWith("/translate", StringComparison.OrdinalIgnoreCase))
         {
-            path += "/translate";
+            path = path[..^"/translate".Length];
         }
 
-        builder.Path = path;
+        builder.Path = $"{path}/{action}";
         return builder.Uri;
     }
+
+    private static IEnumerable<string> GetSupportedTargets(JsonElement language)
+    {
+        if (language.ValueKind != JsonValueKind.Object ||
+            !language.TryGetProperty("targets", out var targets) ||
+            targets.ValueKind != JsonValueKind.Array)
+        {
+            yield break;
+        }
+
+        foreach (var target in targets.EnumerateArray())
+        {
+            if (target.ValueKind == JsonValueKind.String &&
+                !string.IsNullOrWhiteSpace(target.GetString()))
+            {
+                yield return NormalizeLanguageCode(target.GetString()!, allowAuto: false);
+            }
+        }
+    }
+
+    private static TranslationServiceReadiness Unavailable(string message) =>
+        new(
+            TranslationServiceReadinessState.ServiceUnavailable,
+            message,
+            Array.Empty<string>());
 
     private static string NormalizeLanguageCode(string language, bool allowAuto)
     {

@@ -64,7 +64,7 @@ py -m pip install libretranslate
 libretranslate --host 127.0.0.1 --port 5000 --load-only en,zh,ja,ko
 ```
 
-应用默认选择“本地离线 · LibreTranslate”。服务启动后可直接使用；默认地址为 `http://127.0.0.1:5000`，程序会自动调用 `/translate`，无需填写模型或 API 密钥。
+应用默认选择“本地离线 · LibreTranslate”。服务启动后可直接使用；默认地址为 `http://127.0.0.1:5000`，程序会自动调用 `/translate`，无需填写模型或 API 密钥。点击“开始实时翻译”时，程序会先通过 `/languages` 检查服务连接和所选目标语言模型；服务未启动或模型缺失时会直接显示处理提示，不会进入无效的 OCR 重试循环。
 
 为了适合实时屏幕翻译，程序会把每次 OCR 中不重复的非空行合并为一个批量请求，翻译后恢复原始换行、空行、行首缩进和行尾空白，并缓存最近的行译文以减少本机推理次数。云端模式也会使用有容量限制的会话缓存，使 A→B→A 这类重复内容直接复用第一次译文。
 
@@ -116,7 +116,7 @@ dotnet run --project tests/ScreenTranslator.Tests --configuration Debug
 dotnet run --project tests/ScreenTranslator.Tests --configuration Debug -- --screen-capture
 ```
 
-测试覆盖 OCR 格式重建、框选窗口范围、两种译文窗口、侧栏锁定和透明度、翻译引擎切换、本地批量翻译与缓存、目标语言解析、未翻译结果自动重试、DeepSeek/通用 OpenAI 请求差异、响应空白保持、Windows OCR，以及真实屏幕截图到 OCR 的链路。
+测试覆盖 OCR 格式重建、框选窗口范围、两种译文窗口、侧栏锁定和透明度、翻译引擎切换、本地服务与目标模型就绪检查、本地批量翻译与缓存、目标语言解析、未翻译结果自动重试、DeepSeek/通用 OpenAI 请求差异、响应空白保持、Windows OCR，以及真实屏幕截图到 OCR 的链路。
 
 ## 当前边界
 

@@ -41,10 +41,12 @@ public partial class MainWindow : Window
 
     private ITextRecognizer? _textRecognizer;
     private ScreenRegion? _selectedRegion;
+    private CancellationTokenSource? _startupCancellation;
     private CancellationTokenSource? _runCancellation;
     private Task? _runTask;
     private string? _lastTranslation;
     private bool _isSelectingRegion;
+    private bool _isStartingTranslation;
     private bool _providerUiReady;
     private TranslationEngineKind _selectedEngine = TranslationEngineKind.LocalLibreTranslate;
     private string _cloudEndpoint = CloudEndpoint;
@@ -133,7 +135,7 @@ public partial class MainWindow : Window
 
     private async Task SelectRegionAsync()
     {
-        if (_isSelectingRegion)
+        if (_isSelectingRegion || _isStartingTranslation)
         {
             return;
         }
@@ -167,7 +169,7 @@ public partial class MainWindow : Window
 
                 if (resumeTranslation)
                 {
-                    StartTranslation();
+                    await StartTranslationAsync();
                 }
                 else
                 {
@@ -185,7 +187,7 @@ public partial class MainWindow : Window
 
             if (resumeTranslation)
             {
-                StartTranslation();
+                await StartTranslationAsync();
             }
             else
             {
@@ -200,77 +202,138 @@ public partial class MainWindow : Window
 
     private async void StartStopButton_Click(object sender, RoutedEventArgs e)
     {
+        if (_isStartingTranslation)
+        {
+            return;
+        }
+
         if (_runCancellation is not null)
         {
             await StopTranslationAsync();
             return;
         }
 
-        StartTranslation();
+        await StartTranslationAsync();
     }
 
-    private void StartTranslation()
+    private async Task StartTranslationAsync()
     {
-        if (_selectedRegion is not { } region)
+        if (_isStartingTranslation)
         {
-            SetStatus("请先框选屏幕区域", "点击“框选区域”后拖动鼠标", isError: true);
             return;
         }
 
-        if (!Uri.TryCreate(EndpointTextBox.Text.Trim(), UriKind.Absolute, out var endpoint) ||
-            (endpoint.Scheme != Uri.UriSchemeHttps && endpoint.Scheme != Uri.UriSchemeHttp))
-        {
-            SetStatus("接口地址无效", "请输入完整的 http 或 https 地址", isError: true);
-            return;
-        }
-
-        var selectedEngine = GetSelectedTranslationEngine();
-        var model = ModelTextBox.Text.Trim();
-        var apiKey = ApiKeyPasswordBox.Password.Trim();
-
-        if (selectedEngine == TranslationEngineKind.OpenAiCompatible &&
-            (string.IsNullOrWhiteSpace(model) || string.IsNullOrWhiteSpace(apiKey)))
-        {
-            SetStatus("模型或 API 密钥为空", "可输入密钥或设置 DEEPSEEK_API_KEY", isError: true);
-            return;
-        }
-
-        ITranslationService translationService;
+        _isStartingTranslation = true;
 
         try
         {
-            _textRecognizer ??= new WindowsOcrTextRecognizer();
+            if (_selectedRegion is not { } region)
+            {
+                SetStatus("请先框选屏幕区域", "点击“框选区域”后拖动鼠标", isError: true);
+                return;
+            }
 
-            if (selectedEngine == TranslationEngineKind.LocalLibreTranslate)
+            if (!Uri.TryCreate(EndpointTextBox.Text.Trim(), UriKind.Absolute, out var endpoint) ||
+                (endpoint.Scheme != Uri.UriSchemeHttps && endpoint.Scheme != Uri.UriSchemeHttp))
             {
-                _offlineTranslationService.Configure(endpoint);
-                translationService = _offlineTranslationService;
+                SetStatus("接口地址无效", "请输入完整的 http 或 https 地址", isError: true);
+                return;
             }
-            else
+
+            var selectedEngine = GetSelectedTranslationEngine();
+            var model = ModelTextBox.Text.Trim();
+            var apiKey = ApiKeyPasswordBox.Password.Trim();
+
+            if (selectedEngine == TranslationEngineKind.OpenAiCompatible &&
+                (string.IsNullOrWhiteSpace(model) || string.IsNullOrWhiteSpace(apiKey)))
             {
-                _cloudTranslationService.Configure(new TranslationProviderOptions(endpoint, model, apiKey));
-                translationService = _cloudTranslationService;
+                SetStatus("模型或 API 密钥为空", "可输入密钥或设置 DEEPSEEK_API_KEY", isError: true);
+                return;
             }
+
+            ITranslationService translationService;
+
+            try
+            {
+                if (selectedEngine == TranslationEngineKind.LocalLibreTranslate)
+                {
+                    _offlineTranslationService.Configure(endpoint);
+                    _startupCancellation = new CancellationTokenSource();
+                    SetStartupControlsEnabled(false);
+                    SetStatus(
+                        "正在检查本地翻译服务",
+                        "验证服务连接和目标语言模型…",
+                        isError: false);
+
+                    var readiness = await _offlineTranslationService.CheckReadinessAsync(
+                        GetTargetLanguage(),
+                        _startupCancellation.Token);
+
+                    if (!readiness.IsReady)
+                    {
+                        var status = readiness.State ==
+                                     TranslationServiceReadinessState.TargetLanguageUnavailable
+                            ? "缺少目标语言模型"
+                            : "本地翻译服务未就绪";
+                        SetStatus(status, readiness.Message, isError: true);
+                        return;
+                    }
+
+                    translationService = _offlineTranslationService;
+                }
+                else
+                {
+                    _cloudTranslationService.Configure(
+                        new TranslationProviderOptions(endpoint, model, apiKey));
+                    translationService = _cloudTranslationService;
+                }
+
+                _textRecognizer ??= new WindowsOcrTextRecognizer();
+            }
+            catch (OperationCanceledException) when (_startupCancellation?.IsCancellationRequested == true)
+            {
+                return;
+            }
+            catch (Exception exception)
+            {
+                SetStatus("翻译引擎初始化失败", exception.Message, isError: true);
+                return;
+            }
+
+            _lastTranslation = null;
+            _runCancellation = new CancellationTokenSource();
+            StartStopButton.Content = "停止实时翻译";
+            SelectRegionButton.IsEnabled = false;
+            TranslationEngineComboBox.IsEnabled = false;
+            SetStatus("正在识别所选区域", "只在文字变化时调用翻译接口", isError: false);
+            ShowActiveOutput("正在识别…", region);
+
+            _runTask = RunTranslationLoopAsync(
+                region,
+                translationService,
+                selectedEngine,
+                _runCancellation.Token);
         }
-        catch (Exception exception)
+        finally
         {
-            SetStatus("翻译引擎初始化失败", exception.Message, isError: true);
-            return;
+            _startupCancellation?.Dispose();
+            _startupCancellation = null;
+            _isStartingTranslation = false;
+            StartStopButton.IsEnabled = true;
+
+            if (_runCancellation is null)
+            {
+                SelectRegionButton.IsEnabled = true;
+                TranslationEngineComboBox.IsEnabled = true;
+            }
         }
+    }
 
-        _lastTranslation = null;
-        _runCancellation = new CancellationTokenSource();
-        StartStopButton.Content = "停止实时翻译";
-        SelectRegionButton.IsEnabled = false;
-        TranslationEngineComboBox.IsEnabled = false;
-        SetStatus("正在识别所选区域", "只在文字变化时调用翻译接口", isError: false);
-        ShowActiveOutput("正在识别…", region);
-
-        _runTask = RunTranslationLoopAsync(
-            region,
-            translationService,
-            selectedEngine,
-            _runCancellation.Token);
+    private void SetStartupControlsEnabled(bool isEnabled)
+    {
+        StartStopButton.IsEnabled = isEnabled;
+        SelectRegionButton.IsEnabled = isEnabled;
+        TranslationEngineComboBox.IsEnabled = isEnabled;
     }
 
     private async Task RunTranslationLoopAsync(
@@ -432,6 +495,7 @@ public partial class MainWindow : Window
 
     private async Task StopTranslationAsync()
     {
+        _startupCancellation?.Cancel();
         var cancellation = _runCancellation;
         var task = _runTask;
         _runCancellation = null;
@@ -725,6 +789,7 @@ public partial class MainWindow : Window
     {
         _globalHotkeyManager.Pressed -= GlobalHotkeyManager_Pressed;
         _globalHotkeyManager.Dispose();
+        _startupCancellation?.Cancel();
         _runCancellation?.Cancel();
         _overlayWindow.Close();
         _regionIndicatorWindow.Close();

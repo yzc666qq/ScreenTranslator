@@ -34,6 +34,7 @@ internal static class Program
         Run("Side panel supports locking, resizing and opacity", TestSidePanelControls);
         Run("Overlay preserves translated text and region", TestOverlayWindow);
         Run("LibreTranslate adapter preserves layout and batches local requests", () => TestLibreTranslateAdapterAsync().GetAwaiter().GetResult());
+        Run("LibreTranslate readiness validates service and target models", () => TestLibreTranslateReadinessAsync().GetAwaiter().GetResult());
         Run("DeepSeek adapter preserves formatting", () => TestDeepSeekAdapterAsync().GetAwaiter().GetResult());
         Run("Cloud session cache reuses earlier translations", () => TestCloudSessionCacheAsync().GetAwaiter().GetResult());
         Run("Untranslated output retries once", () => TestUntranslatedOutputRetryAsync().GetAwaiter().GetResult());
@@ -520,6 +521,83 @@ internal static class Program
         var cachedResult = await service.TranslateAsync(source, "auto", "zh-CN");
         AssertEqual(translated, cachedResult.TranslatedText);
         AssertEqual(1, handler.RequestCount);
+    }
+
+    private static async Task TestLibreTranslateReadinessAsync()
+    {
+        var readyHandler = new RecordingHandler(request =>
+        {
+            AssertEqual(HttpMethod.Get, request.Method);
+            return JsonResponse(new[]
+            {
+                new
+                {
+                    code = "en",
+                    name = "English",
+                    targets = new[] { "fr", "zh" }
+                }
+            });
+        });
+        using var readyClient = new HttpClient(readyHandler);
+        var readyService = new LibreTranslateTranslationService(readyClient);
+        readyService.Configure(new Uri("http://127.0.0.1:5000/api/translate?ignored=true"));
+
+        var ready = await readyService.CheckReadinessAsync("zh-CN");
+        Assert(ready.IsReady, ready.Message);
+        AssertEqual(TranslationServiceReadinessState.Ready, ready.State);
+        AssertEqual("http://127.0.0.1:5000/api/languages", readyHandler.RequestUri?.ToString());
+        AssertEqual(1, readyHandler.RequestCount);
+
+        var missingModelHandler = new RecordingHandler(_ => JsonResponse(new[]
+        {
+            new
+            {
+                code = "en",
+                name = "English",
+                targets = new[] { "fr" }
+            }
+        }));
+        using var missingModelClient = new HttpClient(missingModelHandler);
+        var missingModelService = new LibreTranslateTranslationService(missingModelClient);
+        missingModelService.Configure(new Uri("http://127.0.0.1:5000"));
+
+        var missingModel = await missingModelService.CheckReadinessAsync("zh-CN");
+        Assert(!missingModel.IsReady, "A missing target model must block offline translation startup.");
+        AssertEqual(
+            TranslationServiceReadinessState.TargetLanguageUnavailable,
+            missingModel.State);
+        Assert(missingModel.Message.Contains("zh", StringComparison.Ordinal),
+            "The missing-model message must identify the normalized target language.");
+
+        var unavailableHandler = new RecordingHandler(
+            _ => throw new HttpRequestException("Connection refused"));
+        using var unavailableClient = new HttpClient(unavailableHandler);
+        var unavailableService = new LibreTranslateTranslationService(unavailableClient);
+        unavailableService.Configure(new Uri("http://127.0.0.1:5000"));
+
+        var unavailable = await unavailableService.CheckReadinessAsync("zh-CN");
+        Assert(!unavailable.IsReady, "An unreachable local service must block startup.");
+        AssertEqual(
+            TranslationServiceReadinessState.ServiceUnavailable,
+            unavailable.State);
+        Assert(unavailable.Message.Contains("启动 LibreTranslate", StringComparison.Ordinal),
+            "The unavailable-service message must contain an actionable startup instruction.");
+
+        var malformedHandler = new RecordingHandler(_ => JsonResponse(new object[]
+        {
+            "not-a-language",
+            new { name = "Missing code" }
+        }));
+        using var malformedClient = new HttpClient(malformedHandler);
+        var malformedService = new LibreTranslateTranslationService(malformedClient);
+        malformedService.Configure(new Uri("http://127.0.0.1:5000"));
+
+        var malformed = await malformedService.CheckReadinessAsync("zh-CN");
+        Assert(!malformed.IsReady,
+            "A malformed language list must produce a readiness failure instead of throwing.");
+        AssertEqual(
+            TranslationServiceReadinessState.ServiceUnavailable,
+            malformed.State);
     }
 
     private static async Task TestDeepSeekAdapterAsync()
