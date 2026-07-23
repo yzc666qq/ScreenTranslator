@@ -312,12 +312,13 @@
                         <StackPanel>
                             <TextBlock Style="{StaticResource FieldLabelStyle}" Text="翻译方式" />
                             <ComboBox x:Name="TranslationEngineComboBox"
-                                      SelectedIndex="1"
+                                      SelectedIndex="2"
                                       SelectionChanged="TranslationEngineComboBox_SelectionChanged"
                                       Style="{StaticResource InputComboBoxStyle}">
                                 <ComboBoxItem Content="DeepSeek / OpenAI 兼容" Tag="openai" />
-                                <ComboBoxItem Content="内置离线 · Qwen2.5" Tag="qwen-local" />
-                                <ComboBoxItem Content="外部服务 · LibreTranslate" Tag="libretranslate" />
+                                <ComboBoxItem Content="高质量离线 · Qwen2.5" Tag="qwen-local" />
+                                <ComboBoxItem Content="快速离线 · LibreTranslate" Tag="libretranslate-local" />
+                                <ComboBoxItem Content="外部服务 · LibreTranslate" Tag="libretranslate-external" />
                             </ComboBox>
 
                             <StackPanel x:Name="EndpointPanel">

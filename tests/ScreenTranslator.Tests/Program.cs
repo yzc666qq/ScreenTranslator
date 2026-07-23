@@ -38,6 +38,8 @@ internal static class Program
         Run("Integrated model download is verified and reused", () => TestLocalModelStoreAsync().GetAwaiter().GetResult());
         Run("LibreTranslate adapter preserves layout and batches local requests", () => TestLibreTranslateAdapterAsync().GetAwaiter().GetResult());
         Run("LibreTranslate readiness validates service and target models", () => TestLibreTranslateReadinessAsync().GetAwaiter().GetResult());
+        Run("Managed LibreTranslate retries one transient server failure", () => TestManagedLibreTranslateTransientRetryAsync().GetAwaiter().GetResult());
+        Run("Managed LibreTranslate uses a hidden private runtime", TestManagedLibreTranslateStartInfo);
         Run("DeepSeek adapter preserves formatting", () => TestDeepSeekAdapterAsync().GetAwaiter().GetResult());
         Run("Cloud session cache reuses earlier translations", () => TestCloudSessionCacheAsync().GetAwaiter().GetResult());
         Run("Untranslated output retries once", () => TestUntranslatedOutputRetryAsync().GetAwaiter().GetResult());
@@ -59,6 +61,11 @@ internal static class Program
         if (args.Contains("--local-model", StringComparer.OrdinalIgnoreCase))
         {
             Run("Official Qwen model translates locally end to end", () => TestIntegratedLocalModelAsync().GetAwaiter().GetResult());
+        }
+
+        if (args.Contains("--libretranslate-runtime", StringComparer.OrdinalIgnoreCase))
+        {
+            Run("Managed LibreTranslate translates locally end to end", () => TestManagedLibreTranslateAsync().GetAwaiter().GetResult());
         }
 
         Console.WriteLine($"RESULT passed={_passed} failed={_failed}");
@@ -313,18 +320,21 @@ internal static class Program
         var previewTemplate = fontFamily.ItemTemplate;
         Assert(previewTemplate is not null, "Font choices must use a visual preview template.");
 
-        AssertEqual(1, translationEngine.SelectedIndex);
+        AssertEqual(2, translationEngine.SelectedIndex);
         AssertEqual(System.Windows.Visibility.Collapsed, endpointPanel.Visibility);
         AssertEqual(System.Windows.Visibility.Collapsed, cloudOptions.Visibility);
-        Assert(providerHint.Text.Contains("无需 API 密钥或后台服务", StringComparison.Ordinal),
-            "The integrated provider must explain that it needs neither a key nor a background service.");
+        Assert(providerHint.Text.Contains("无需 API 密钥或手动启动服务", StringComparison.Ordinal),
+            "The managed LibreTranslate provider must explain that it starts its own service.");
         Assert(translationEngine.SelectedItem is ComboBoxItem selectedEngine &&
-               selectedEngine.Content?.ToString()?.Contains("内置离线", StringComparison.Ordinal) == true,
-            "The integrated Qwen engine must be selected by default.");
+               selectedEngine.Content?.ToString()?.Contains("快速离线", StringComparison.Ordinal) == true,
+            "The managed LibreTranslate engine must be selected by default.");
         translationEngine.SelectedIndex = 0;
         AssertEqual(System.Windows.Visibility.Visible, endpointPanel.Visibility);
         AssertEqual(System.Windows.Visibility.Visible, cloudOptions.Visibility);
-        translationEngine.SelectedIndex = 2;
+        translationEngine.SelectedIndex = 1;
+        AssertEqual(System.Windows.Visibility.Collapsed, endpointPanel.Visibility);
+        AssertEqual(System.Windows.Visibility.Collapsed, cloudOptions.Visibility);
+        translationEngine.SelectedIndex = 3;
         AssertEqual(System.Windows.Visibility.Visible, endpointPanel.Visibility);
         AssertEqual(System.Windows.Visibility.Collapsed, cloudOptions.Visibility);
         AssertEqual("http://127.0.0.1:5000", endpoint.Text);
@@ -633,6 +643,102 @@ internal static class Program
             $"Expected a Chinese translation but received: {result.TranslatedText}");
     }
 
+    private static void TestManagedLibreTranslateStartInfo()
+    {
+        var dataRoot = Path.Combine(
+            Path.GetTempPath(),
+            $"ScreenTranslator-libretranslate-test-{Guid.NewGuid():N}");
+        var startInfo = ManagedLibreTranslateHost.CreateStartInfo(
+            @"C:\ScreenTranslator\LibreTranslate\libretranslate.exe",
+            dataRoot,
+            51234);
+        var arguments = startInfo.ArgumentList.ToArray();
+
+        Assert(!startInfo.UseShellExecute && startInfo.CreateNoWindow,
+            "Managed LibreTranslate must start without a visible shell window.");
+        Assert(startInfo.RedirectStandardOutput && startInfo.RedirectStandardError,
+            "Managed LibreTranslate logs must be captured for actionable startup errors.");
+        Assert(arguments.Contains("--load-only", StringComparer.Ordinal) &&
+               arguments.Contains("en,zh,ja,ko", StringComparer.Ordinal),
+            "The private runtime must load only the supported translation languages.");
+        Assert(arguments.Contains("--disable-web-ui", StringComparer.Ordinal),
+            "The product-managed runtime must not expose an unnecessary browser UI.");
+        AssertEqual("cpu", startInfo.Environment["ARGOS_DEVICE_TYPE"]);
+        AssertEqual("ARGOSTRANSLATE", startInfo.Environment["ARGOS_CHUNK_TYPE"]);
+        AssertEqual(Path.Combine(dataRoot, "Models"), startInfo.Environment["ARGOS_PACKAGES_DIR"]);
+        Assert(!Directory.Exists(dataRoot),
+            "Building process configuration must not create or delete test directories.");
+    }
+
+    private static async Task TestManagedLibreTranslateAsync()
+    {
+        var runtimePath = Environment.GetEnvironmentVariable(
+            "SCREENTRANSLATOR_LIBRETRANSLATE_RUNTIME");
+
+        if (string.IsNullOrWhiteSpace(runtimePath))
+        {
+            runtimePath = Path.Combine(
+                Environment.CurrentDirectory,
+                "artifacts",
+                "libretranslate-runtime",
+                "python",
+                "Scripts",
+                "libretranslate.exe");
+        }
+
+        var dataRoot = Path.Combine(
+            Environment.CurrentDirectory,
+            "artifacts",
+            "libretranslate-data");
+        using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(45) };
+        using var host = new ManagedLibreTranslateHost(
+            client,
+            runtimePath,
+            dataRoot,
+            TimeSpan.FromMinutes(2));
+        var progress = new DelegateProgress<LocalEngineProgress>(
+            update => Console.WriteLine($"LIBRETRANSLATE {update.Title}: {update.Detail}"));
+        var endpoint = await host.StartAsync("zh-CN", progress);
+        var service = new LibreTranslateTranslationService(client);
+        service.Configure(endpoint, isManagedRuntime: true);
+
+        TranslationResult chinese;
+        TranslationResult japanese;
+        TranslationResult korean;
+        TranslationResult english;
+
+        try
+        {
+            chinese = await service.TranslateAsync("Hello world", "auto", "zh-CN");
+            japanese = await service.TranslateAsync("Hello world", "auto", "ja");
+            korean = await service.TranslateAsync("Hello world", "auto", "ko");
+            english = await service.TranslateAsync("你好世界", "auto", "en");
+        }
+        catch
+        {
+            Console.WriteLine($"LIBRETRANSLATE LOGS {host.DiagnosticSummary}");
+            throw;
+        }
+        Console.WriteLine(
+            $"LIBRETRANSLATE TRANSLATIONS zh={chinese.TranslatedText}; " +
+            $"ja={japanese.TranslatedText}; ko={korean.TranslatedText}; en={english.TranslatedText}");
+
+        Assert(host.IsRunning, "The private LibreTranslate process must remain alive while in use.");
+        Assert(chinese.TranslatedText.Any(character => character is >= '\u3400' and <= '\u9fff'),
+            $"Expected a Chinese LibreTranslate result but received: {chinese.TranslatedText}");
+        Assert(japanese.TranslatedText.Any(character =>
+                character is >= '\u3040' and <= '\u30ff'),
+            $"Expected a Japanese LibreTranslate result but received: {japanese.TranslatedText}");
+        Assert(korean.TranslatedText.Any(character =>
+                character is >= '\uac00' and <= '\ud7af'),
+            $"Expected a Korean LibreTranslate result but received: {korean.TranslatedText}");
+        Assert(english.TranslatedText.Any(character => character is >= 'A' and <= 'z'),
+            $"Expected an English LibreTranslate result but received: {english.TranslatedText}");
+
+        host.Stop();
+        Assert(!host.IsRunning, "Stopping translation must release the private LibreTranslate process.");
+    }
+
     private static async Task TestLibreTranslateReadinessAsync()
     {
         var readyHandler = new RecordingHandler(request =>
@@ -693,6 +799,14 @@ internal static class Program
         Assert(unavailable.Message.Contains("启动 LibreTranslate", StringComparison.Ordinal),
             "The unavailable-service message must contain an actionable startup instruction.");
 
+        var managedUnavailableService = new LibreTranslateTranslationService(unavailableClient);
+        managedUnavailableService.Configure(
+            new Uri("http://127.0.0.1:5000"),
+            isManagedRuntime: true);
+        var managedUnavailable = await managedUnavailableService.CheckReadinessAsync("zh-CN");
+        Assert(managedUnavailable.Message.Contains("意外停止", StringComparison.Ordinal),
+            "A managed-runtime failure must not tell the user to start LibreTranslate manually.");
+
         var malformedHandler = new RecordingHandler(_ => JsonResponse(new object[]
         {
             "not-a-language",
@@ -708,6 +822,54 @@ internal static class Program
         AssertEqual(
             TranslationServiceReadinessState.ServiceUnavailable,
             malformed.State);
+    }
+
+    private static async Task TestManagedLibreTranslateTransientRetryAsync()
+    {
+        var managedHandlerRequestCount = 0;
+        var managedHandler = new RecordingHandler(_ =>
+            managedHandlerRequestCount++ == 0
+                ? new HttpResponseMessage(HttpStatusCode.InternalServerError)
+                {
+                    Content = new StringContent(
+                        """{"error":"model is still loading"}""",
+                        Encoding.UTF8,
+                        "application/json")
+                }
+                : JsonResponse(new { translatedText = new[] { "你好" } }));
+        using var managedClient = new HttpClient(managedHandler);
+        var managedService = new LibreTranslateTranslationService(managedClient);
+        managedService.Configure(new Uri("http://127.0.0.1:5000"), isManagedRuntime: true);
+
+        var managedResult = await managedService.TranslateAsync("Hello", "auto", "zh-CN");
+
+        AssertEqual("你好", managedResult.TranslatedText);
+        AssertEqual(2, managedHandler.RequestCount);
+
+        var externalHandler = new RecordingHandler(_ =>
+            new HttpResponseMessage(HttpStatusCode.InternalServerError)
+            {
+                Content = new StringContent(
+                    """{"error":"external failure"}""",
+                    Encoding.UTF8,
+                    "application/json")
+            });
+        using var externalClient = new HttpClient(externalHandler);
+        var externalService = new LibreTranslateTranslationService(externalClient);
+        externalService.Configure(new Uri("http://127.0.0.1:5000"));
+        var failed = false;
+
+        try
+        {
+            await externalService.TranslateAsync("Hello", "auto", "zh-CN");
+        }
+        catch (HttpRequestException exception)
+        {
+            failed = exception.Message.Contains("external failure", StringComparison.Ordinal);
+        }
+
+        Assert(failed, "An external LibreTranslate 5xx response must surface without a hidden retry.");
+        AssertEqual(1, externalHandler.RequestCount);
     }
 
     private static async Task TestDeepSeekAdapterAsync()

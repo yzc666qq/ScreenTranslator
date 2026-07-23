@@ -10,6 +10,7 @@ public sealed class LibreTranslateTranslationService(HttpClient httpClient) : IT
 {
     private const int MaximumCachedLines = 512;
     private static readonly TimeSpan ReadinessTimeout = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan ManagedRuntimeRetryDelay = TimeSpan.FromMilliseconds(250);
     private static readonly Regex LineSeparatorPattern = new(
         "(\\r\\n|\\n|\\r)",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
@@ -17,8 +18,9 @@ public sealed class LibreTranslateTranslationService(HttpClient httpClient) : IT
     private readonly Dictionary<CacheKey, string> _translationCache = [];
     private Uri? _translateEndpoint;
     private Uri? _languagesEndpoint;
+    private bool _isManagedRuntime;
 
-    public void Configure(Uri endpoint)
+    public void Configure(Uri endpoint, bool isManagedRuntime = false)
     {
         ArgumentNullException.ThrowIfNull(endpoint);
 
@@ -38,6 +40,7 @@ public sealed class LibreTranslateTranslationService(HttpClient httpClient) : IT
         }
 
         _languagesEndpoint = languagesEndpoint;
+        _isManagedRuntime = isManagedRuntime;
     }
 
     public async Task<TranslationServiceReadiness> CheckReadinessAsync(
@@ -63,13 +66,13 @@ public sealed class LibreTranslateTranslationService(HttpClient httpClient) : IT
         {
             return Unavailable(
                 $"无法连接 {endpoint.GetLeftPart(UriPartial.Authority)}。" +
-                "请先启动 LibreTranslate，再重新点击“开始实时翻译”。");
+                GetUnavailableAction());
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
             return Unavailable(
                 $"连接 {endpoint.GetLeftPart(UriPartial.Authority)} 超时。" +
-                "请确认 LibreTranslate 已启动且语言模型已加载完成。");
+                GetTimeoutAction());
         }
 
         using (response)
@@ -269,76 +272,88 @@ public sealed class LibreTranslateTranslationService(HttpClient httpClient) : IT
             format = "text"
         };
 
-        using var request = new HttpRequestMessage(HttpMethod.Post, endpoint)
+        for (var attempt = 0; ; attempt++)
         {
-            Content = new StringContent(
-                JsonSerializer.Serialize(requestBody),
-                Encoding.UTF8,
-                "application/json")
-        };
-
-        HttpResponseMessage response;
-
-        try
-        {
-            response = await httpClient.SendAsync(request, cancellationToken);
-        }
-        catch (HttpRequestException exception)
-        {
-            throw new InvalidOperationException(
-                $"无法连接本地翻译服务 {endpoint.GetLeftPart(UriPartial.Authority)}。请先启动 LibreTranslate。",
-                exception);
-        }
-        catch (TaskCanceledException exception) when (!cancellationToken.IsCancellationRequested)
-        {
-            throw new TimeoutException("本地翻译服务响应超时，请确认语言模型已经加载完成。", exception);
-        }
-
-        using (response)
-        {
-            var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
-
-            if (!response.IsSuccessStatusCode)
+            using var request = new HttpRequestMessage(HttpMethod.Post, endpoint)
             {
-                throw new HttpRequestException(
-                    $"本地翻译服务返回 {(int)response.StatusCode}: {GetErrorSummary(responseBody)}");
+                Content = new StringContent(
+                    JsonSerializer.Serialize(requestBody),
+                    Encoding.UTF8,
+                    "application/json")
+            };
+
+            HttpResponseMessage response;
+
+            try
+            {
+                response = await httpClient.SendAsync(request, cancellationToken);
+            }
+            catch (HttpRequestException exception)
+            {
+                throw new InvalidOperationException(
+                    $"无法连接本地翻译服务 {endpoint.GetLeftPart(UriPartial.Authority)}。" +
+                    GetUnavailableAction(),
+                    exception);
+            }
+            catch (TaskCanceledException exception) when (!cancellationToken.IsCancellationRequested)
+            {
+                throw new TimeoutException("本地翻译服务响应超时，请确认语言模型已经加载完成。", exception);
             }
 
-            using var document = JsonDocument.Parse(responseBody);
-
-            if (!document.RootElement.TryGetProperty("translatedText", out var translatedText))
+            using (response)
             {
-                throw new InvalidOperationException("本地翻译服务未返回 translatedText。");
-            }
+                var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
 
-            if (translatedText.ValueKind == JsonValueKind.String && contents.Count == 1)
-            {
-                var result = translatedText.GetString();
-
-                if (string.IsNullOrWhiteSpace(result))
+                if (!response.IsSuccessStatusCode)
                 {
-                    throw new InvalidOperationException("本地翻译服务返回了空译文。");
+                    if (_isManagedRuntime &&
+                        attempt == 0 &&
+                        (int)response.StatusCode is >= 500 and <= 599)
+                    {
+                        await Task.Delay(ManagedRuntimeRetryDelay, cancellationToken);
+                        continue;
+                    }
+
+                    throw new HttpRequestException(
+                        $"本地翻译服务返回 {(int)response.StatusCode}: {GetErrorSummary(responseBody)}");
                 }
 
-                return [result];
+                using var document = JsonDocument.Parse(responseBody);
+
+                if (!document.RootElement.TryGetProperty("translatedText", out var translatedText))
+                {
+                    throw new InvalidOperationException("本地翻译服务未返回 translatedText。");
+                }
+
+                if (translatedText.ValueKind == JsonValueKind.String && contents.Count == 1)
+                {
+                    var result = translatedText.GetString();
+
+                    if (string.IsNullOrWhiteSpace(result))
+                    {
+                        throw new InvalidOperationException("本地翻译服务返回了空译文。");
+                    }
+
+                    return [result];
+                }
+
+                if (translatedText.ValueKind != JsonValueKind.Array)
+                {
+                    throw new InvalidOperationException("本地翻译服务返回了无法识别的译文格式。");
+                }
+
+                var results = translatedText
+                    .EnumerateArray()
+                    .Select(item => item.GetString() ?? string.Empty)
+                    .ToArray();
+
+                if (results.Length != contents.Count || results.Any(string.IsNullOrWhiteSpace))
+                {
+                    throw new InvalidOperationException("本地翻译服务返回的译文数量或内容无效。");
+                }
+
+                return results;
             }
-
-            if (translatedText.ValueKind != JsonValueKind.Array)
-            {
-                throw new InvalidOperationException("本地翻译服务返回了无法识别的译文格式。");
-            }
-
-            var results = translatedText
-                .EnumerateArray()
-                .Select(item => item.GetString() ?? string.Empty)
-                .ToArray();
-
-            if (results.Length != contents.Count || results.Any(string.IsNullOrWhiteSpace))
-            {
-                throw new InvalidOperationException("本地翻译服务返回的译文数量或内容无效。");
-            }
-
-            return results;
         }
     }
 
@@ -384,6 +399,16 @@ public sealed class LibreTranslateTranslationService(HttpClient httpClient) : IT
             TranslationServiceReadinessState.ServiceUnavailable,
             message,
             Array.Empty<string>());
+
+    private string GetUnavailableAction() =>
+        _isManagedRuntime
+            ? "内置 LibreTranslate 可能已意外停止，请停止翻译后重新开始。"
+            : "请先启动 LibreTranslate，再重新点击“开始实时翻译”。";
+
+    private string GetTimeoutAction() =>
+        _isManagedRuntime
+            ? "内置 LibreTranslate 正在准备语言模型，请稍后重试。"
+            : "请确认 LibreTranslate 已启动且语言模型已加载完成。";
 
     private static string NormalizeLanguageCode(string language, bool allowAuto)
     {

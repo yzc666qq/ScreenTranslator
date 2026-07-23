@@ -25,4 +25,12 @@
     <PackageReference Include="LLamaSharp.Backend.Cpu" Version="0.27.0" />
   </ItemGroup>
 
+  <ItemGroup Condition="Exists('$(MSBuildProjectDirectory)\..\..\artifacts\libretranslate-runtime\python\Scripts\libretranslate.exe')">
+    <Content Include="$(MSBuildProjectDirectory)\..\..\artifacts\libretranslate-runtime\**\*">
+      <Link>LibreTranslate\%(RecursiveDir)%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
+  </ItemGroup>
+
 </Project>

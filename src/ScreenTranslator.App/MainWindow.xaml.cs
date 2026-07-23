@@ -40,6 +40,7 @@ public partial class MainWindow : Window
     private readonly OpenAiCompatibleTranslationService _cloudTranslationService;
     private readonly QwenLocalTranslationService _integratedTranslationService;
     private readonly LlamaSharpLocalModelRuntime _integratedModelRuntime;
+    private readonly ManagedLibreTranslateHost _managedLibreTranslateHost;
     private readonly LibreTranslateTranslationService _libreTranslateTranslationService;
 
     private ITextRecognizer? _textRecognizer;
@@ -51,7 +52,7 @@ public partial class MainWindow : Window
     private bool _isSelectingRegion;
     private bool _isStartingTranslation;
     private bool _providerUiReady;
-    private TranslationEngineKind _selectedEngine = TranslationEngineKind.IntegratedQwen;
+    private TranslationEngineKind _selectedEngine = TranslationEngineKind.ManagedLibreTranslate;
     private string _cloudEndpoint = CloudEndpoint;
     private string _libreTranslateEndpoint = LibreTranslateEndpoint;
 
@@ -62,6 +63,7 @@ public partial class MainWindow : Window
         _integratedModelRuntime = new LlamaSharpLocalModelRuntime(
             new LocalModelStore(_modelHttpClient));
         _integratedTranslationService = new QwenLocalTranslationService(_integratedModelRuntime);
+        _managedLibreTranslateHost = new ManagedLibreTranslateHost(_httpClient);
         _libreTranslateTranslationService = new LibreTranslateTranslationService(_httpClient);
         InitializeTranslationTypography();
         UpdateTranslationEngineUi();
@@ -119,14 +121,27 @@ public partial class MainWindow : Window
             }
         }
 
+        var previousEngine = _selectedEngine;
         _selectedEngine = GetSelectedTranslationEngine();
-        var isIntegrated = _selectedEngine == TranslationEngineKind.IntegratedQwen;
-        EndpointPanel.Visibility = isIntegrated ? Visibility.Collapsed : Visibility.Visible;
+
+        if (_providerUiReady &&
+            previousEngine == TranslationEngineKind.ManagedLibreTranslate &&
+            _selectedEngine != TranslationEngineKind.ManagedLibreTranslate)
+        {
+            _managedLibreTranslateHost.Stop();
+        }
+
+        var usesManagedLocalRuntime = _selectedEngine is
+            TranslationEngineKind.IntegratedQwen or
+            TranslationEngineKind.ManagedLibreTranslate;
+        EndpointPanel.Visibility = usesManagedLocalRuntime
+            ? Visibility.Collapsed
+            : Visibility.Visible;
         CloudOptionsPanel.Visibility = _selectedEngine == TranslationEngineKind.OpenAiCompatible
             ? Visibility.Visible
             : Visibility.Collapsed;
 
-        if (!isIntegrated)
+        if (!usesManagedLocalRuntime)
         {
             EndpointTextBox.Text = _selectedEngine == TranslationEngineKind.ExternalLibreTranslate
                 ? _libreTranslateEndpoint
@@ -137,6 +152,8 @@ public partial class MainWindow : Window
         {
             TranslationEngineKind.IntegratedQwen =>
                 "无需 API 密钥或后台服务；首次自动下载约 469 MB 模型，之后完全离线。",
+            TranslationEngineKind.ManagedLibreTranslate =>
+                "无需 API 密钥或手动启动服务；首次准备约 550 MB 语言包，之后完全离线。",
             TranslationEngineKind.ExternalLibreTranslate =>
                 "高级选项：连接用户自行维护的 LibreTranslate 服务。",
             _ => "也可使用 DEEPSEEK_API_KEY；仅在识别文本变化时请求模型。"
@@ -151,7 +168,8 @@ public partial class MainWindow : Window
         return tag?.ToLowerInvariant() switch
         {
             "qwen-local" => TranslationEngineKind.IntegratedQwen,
-            "libretranslate" => TranslationEngineKind.ExternalLibreTranslate,
+            "libretranslate-local" => TranslationEngineKind.ManagedLibreTranslate,
+            "libretranslate-external" => TranslationEngineKind.ExternalLibreTranslate,
             _ => TranslationEngineKind.OpenAiCompatible
         };
     }
@@ -264,7 +282,9 @@ public partial class MainWindow : Window
             var selectedEngine = GetSelectedTranslationEngine();
             Uri? endpoint = null;
 
-            if (selectedEngine != TranslationEngineKind.IntegratedQwen &&
+            if (selectedEngine is not
+                    (TranslationEngineKind.IntegratedQwen or
+                     TranslationEngineKind.ManagedLibreTranslate) &&
                 (!Uri.TryCreate(EndpointTextBox.Text.Trim(), UriKind.Absolute, out endpoint) ||
                  (endpoint.Scheme != Uri.UriSchemeHttps && endpoint.Scheme != Uri.UriSchemeHttp)))
             {
@@ -299,6 +319,24 @@ public partial class MainWindow : Window
                         progress,
                         _startupCancellation.Token);
                     translationService = _integratedTranslationService;
+                }
+                else if (selectedEngine == TranslationEngineKind.ManagedLibreTranslate)
+                {
+                    _startupCancellation = new CancellationTokenSource();
+                    SetStartupControlsEnabled(false);
+                    var progress = new Progress<LocalEngineProgress>(engineProgress =>
+                        SetStatus(
+                            engineProgress.Title,
+                            engineProgress.Detail,
+                            isError: false));
+                    var managedEndpoint = await _managedLibreTranslateHost.StartAsync(
+                        GetTargetLanguage(),
+                        progress,
+                        _startupCancellation.Token);
+                    _libreTranslateTranslationService.Configure(
+                        managedEndpoint,
+                        isManagedRuntime: true);
+                    translationService = _libreTranslateTranslationService;
                 }
                 else if (selectedEngine == TranslationEngineKind.ExternalLibreTranslate)
                 {
@@ -341,9 +379,12 @@ public partial class MainWindow : Window
             }
             catch (Exception exception)
             {
-                var title = selectedEngine == TranslationEngineKind.IntegratedQwen
-                    ? "内置离线模型准备失败"
-                    : "翻译引擎初始化失败";
+                var title = selectedEngine switch
+                {
+                    TranslationEngineKind.IntegratedQwen => "内置离线模型准备失败",
+                    TranslationEngineKind.ManagedLibreTranslate => "LibreTranslate 准备失败",
+                    _ => "翻译引擎初始化失败"
+                };
                 SetStatus(title, exception.Message, isError: true);
                 return;
             }
@@ -394,6 +435,7 @@ public partial class MainWindow : Window
         var languageDetection = translationEngine switch
         {
             TranslationEngineKind.IntegratedQwen => "源语言：由内置 Qwen 模型自动检测",
+            TranslationEngineKind.ManagedLibreTranslate => "源语言：由内置 LibreTranslate 自动检测",
             TranslationEngineKind.ExternalLibreTranslate => "源语言：由外部离线服务自动检测",
             _ => "源语言：由模型根据正文自动检测"
         };
@@ -583,6 +625,12 @@ public partial class MainWindow : Window
     private async Task ExitTranslationModeAsync()
     {
         await StopTranslationAsync();
+
+        if (_selectedEngine == TranslationEngineKind.ManagedLibreTranslate)
+        {
+            _managedLibreTranslateHost.Stop();
+        }
+
         _overlayWindow.Hide();
         _panelWindow.Hide();
         _lastTranslation = null;
@@ -743,6 +791,7 @@ public partial class MainWindow : Window
     {
         OpenAiCompatible,
         IntegratedQwen,
+        ManagedLibreTranslate,
         ExternalLibreTranslate
     }
 
@@ -846,6 +895,7 @@ public partial class MainWindow : Window
         _overlayWindow.Close();
         _regionIndicatorWindow.Close();
         _panelWindow.AllowClose();
+        _managedLibreTranslateHost.Dispose();
         _integratedModelRuntime.Dispose();
         _httpClient.Dispose();
         _modelHttpClient.Dispose();
